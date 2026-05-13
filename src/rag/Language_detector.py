@@ -48,3 +48,8 @@ class LanguageDetector:
             "confidence": top_conf,
             "reliable": True
         }
+
+lang_detector = LanguageDetector(model_path=r"C:\Users\BS\Downloads\language_detector.pkl", threshold=0.60)
+text = "عليا الطلاق الملك نمبر وان"
+result = lang_detector.predict(text)
+print(result)
