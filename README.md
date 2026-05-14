@@ -52,3 +52,6 @@ rag_app/
 ├── requirements.txt
 └── Dockerfile
 ```
+
+# Model 
+[model](https://drive.google.com/file/d/1ID40tWg3Bk29CMOvScfqSFv4Pi703842/view?usp=sharing)
