@@ -1,0 +1,17 @@
+[project]
+name = "rag-based-mental-health-chatbot"
+version = "0.1.0"
+description = "it's a RAG application used to help people about their mental problems"
+authors = [
+    {name = "Ali-Abdelmenam",email = "aliabdelmonam37@gmail.com"}
+]
+requires-python = ">=3.14"
+dependencies = [
+    "numpy (>=2.4.5,<3.0.0)",
+    "joblib (>=1.5.3,<2.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
