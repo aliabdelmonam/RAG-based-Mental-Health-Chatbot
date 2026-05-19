@@ -23,7 +23,7 @@ _PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "Intent_classif
 _FALLBACK_PROMPT = (
     "You are an intent classifier for a mental health chatbot.\n"
     "Classify the user message into exactly one of:\n"
-    "greeting | goodbye | gratitude | asking_mental_health_question | out_of_scope\n"
+    "greeting | goodbye | gratitude | asking_mental_health_question | out_of_scope | crisis\n"
     'Return ONLY valid JSON: {"intent": "<label>"}'
 )
 
@@ -34,6 +34,7 @@ class IntentLabel(str, Enum):
     GRATITUDE                     = "gratitude"
     ASKING_MENTAL_HEALTH_QUESTION = "asking_mental_health_question"
     OUT_OF_SCOPE                  = "out_of_scope"
+    CRISIS                        = "crisis"
 
 
 @dataclass
