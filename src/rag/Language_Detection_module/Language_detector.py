@@ -24,8 +24,10 @@ class TextPreprocessor:
         if not isinstance(text, str):
             return ""
         text = text.encode("utf-8", errors="ignore").decode("utf-8")
-        # Remove numbers, equals signs, and arithmetic operators (+, -, *, /, %, ^)
-        text = re.sub(r"[\d=+\-*/%^÷×]", "", text)
+        # Remove punctuation, symbols, and operators (non-word and non-space characters)
+        text = re.sub(r"[^\w\s]", "", text)
+        # Remove digits and underscores to keep only letters
+        text = re.sub(r"[\d_]", "", text)
         # Normalize whitespace
         text = re.sub(r"\s+", " ", text).strip()
         return text.lower()
@@ -53,6 +55,14 @@ class LanguageDetector:
         logger.debug("Predicting language...")
         
         clean_text = TextPreprocessor.preprocess(text)
+
+        if not clean_text:
+            logger.warning("Empty text after preprocessing. Bypassing model prediction.")
+            return {
+                "language": None,
+                "confidence": 0.0,
+                "reliable": False
+            }
 
         proba = self.model.predict_proba([clean_text])[0]
         classes = self.model.classes_
