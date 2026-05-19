@@ -1,0 +1,16 @@
+2026-05-18 16:39:56 | INFO     | __main__:LanguageDetector | Initializing LanguageDetector with model: C:\Users\BS\Downloads\language_detector.pkl
+2026-05-18 16:39:56 | DEBUG    | __main__:LanguageDetector | Attempting to load model file...
+2026-05-18 16:40:03 | DEBUG    | __main__:LanguageDetector | Model file loaded successfully.
+2026-05-18 16:40:03 | INFO     | __main__:LanguageDetector | LanguageDetector initialized successfully.
+2026-05-18 16:40:03 | DEBUG    | __main__:LanguageDetector | Predicting language for text: 'عليا الطلاق الملك نمبر وان'
+2026-05-18 16:40:03 | INFO     | __main__:LanguageDetector | Prediction successful: 'ar' (0.99)
+2026-05-18 17:09:15 | INFO     | __main__:EmotionClassifier | Initializing EmotionClassifier from: D:\ITI\roberta_multilabel_model
+2026-05-18 17:09:15 | DEBUG    | __main__:EmotionClassifier | CUDA not detected. Using CPU.
+2026-05-18 17:09:15 | DEBUG    | __main__:EmotionClassifier | Loading tokenizer...
+2026-05-18 17:09:16 | DEBUG    | __main__:EmotionClassifier | Loading model weights...
+2026-05-18 17:09:26 | INFO     | __main__:EmotionClassifier | Model loaded successfully. Labels: ['admiration', 'amusement', 'anger', 'annoyance', 'approval', 'caring', 'confusion', 'curiosity', 'desire', 'disappointment', 'disapproval', 'disgust', 'embarrassment', 'excitement', 'fear', 'gratitude', 'grief', 'joy', 'love', 'nervousness', 'optimism', 'pride', 'realization', 'relief', 'remorse', 'sadness', 'surprise', 'neutral']
+2026-05-18 17:09:26 | INFO     | __main__:EmotionClassifier | Running on device: cpu
+2026-05-18 17:09:26 | DEBUG    | __main__:EmotionClassifier | Predicting emotion for: 'my boss fired me today 😭...'
+2026-05-18 17:10:15 | INFO     | __main__:EmotionClassifier | Prediction: sadness (0.7893)
+2026-05-18 17:10:15 | DEBUG    | __main__:EmotionClassifier | Predicting emotion for: 'I am not happy with the servic...'
+2026-05-18 17:10:15 | INFO     | __main__:EmotionClassifier | Prediction: joy (0.9989)

@@ -1,115 +1,99 @@
+"""
+Logging setup.
+
+Development  → DEBUG to stdout (colored) + rotating file under logs/
+Production   → INFO to stdout only (let the infra capture it)
+
+Set APP_ENV=production to activate production mode.
+"""
+
 import logging
-import sys
 import os
+import sys
 from logging.handlers import TimedRotatingFileHandler
-from datetime import datetime
+from core.Config import get_settings
+# ── Constants ─────────────────────────────────────────────────────────────────
 
-# ==========================================
-# CONFIGURATION
-# ==========================================
+_DEV_FMT  = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+_PROD_FMT = "%(asctime)s | %(levelname)-8s | %(process)d | %(name)s | %(message)s"
+_DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
-# 1. Get the environment (Defaults to 'development' if not set)
-# In production, you would set an environment variable: export APP_ENV=production
-APP_ENV = os.getenv("APP_ENV", "development").lower()
+_COLORS = {
+    logging.DEBUG:    "\x1b[38;20m",   # grey
+    logging.WARNING:  "\x1b[33;20m",   # yellow
+    logging.ERROR:    "\x1b[31;20m",   # red
+    logging.CRITICAL: "\x1b[31;1m",    # bold red
+}
+_RESET = "\x1b[0m"
 
-# 2. Directory for logs
-LOG_DIR = "logs"
-os.makedirs(LOG_DIR, exist_ok=True)
+settings = get_settings()
 
-# 3. Log Formats
-# Development: Human-readable, detailed
-DEV_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
-# Production: Strict, easy to parse, includes process ID
-PROD_FORMAT = "%(asctime)s | %(levelname)-8s | %(process)d | %(name)s | %(message)s"
+# ── Colored formatter ─────────────────────────────────────────────────────────
 
-DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+class _ColoredFormatter(logging.Formatter):
+    """Colorizes log-level prefix for console output in development."""
 
-class ColoredFormatter(logging.Formatter):
-    """Adds colors to log levels for console output (Development only)."""
-    grey = "\x1b[38;20m"
-    yellow = "\x1b[33;20m"
-    red = "\x1b[31;20m"
-    bold_red = "\x1b[31;1m"
-    reset = "\x1b[0m"
+    def format(self, record: logging.LogRecord) -> str:
+        color  = _COLORS.get(record.levelno, "")
+        record = logging.makeLogRecord(record.__dict__)   # shallow copy — don't mutate original
+        record.levelname = f"{color}{record.levelname}{_RESET}" if color else record.levelname
+        return super().format(record)
 
-    def __init__(self, fmt=None, datefmt=None, style="%"):
-        super().__init__(fmt, datefmt, style)
-        self.fmt = fmt
-        self.formats = {
-            logging.DEBUG: self.grey + self.fmt + self.reset,
-            logging.INFO: self.fmt, # Default color for info
-            logging.WARNING: self.yellow + self.fmt + self.reset,
-            logging.ERROR: self.red + self.fmt + self.reset,
-            logging.CRITICAL: self.bold_red + self.fmt + self.reset,
-        }
 
-    def format(self, record):
-        log_fmt = self.formats.get(record.levelno)
-        formatter = logging.Formatter(log_fmt, datefmt=self.datefmt)
-        return formatter.format(record)
+# ── Handler factories ─────────────────────────────────────────────────────────
+
+def _console_handler(level: int, colored: bool) -> logging.Handler:
+    handler   = logging.StreamHandler(sys.stdout)
+    formatter = _ColoredFormatter(_DEV_FMT, datefmt=_DATE_FMT) if colored \
+                else logging.Formatter(_PROD_FMT, datefmt=_DATE_FMT)
+    handler.setLevel(level)
+    handler.setFormatter(formatter)
+    return handler
+
+
+def _file_handler(path: str, level: int, fmt: str, backup_days: int) -> logging.Handler:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    handler = TimedRotatingFileHandler(
+        filename=path,
+        when="midnight",
+        interval=1,
+        backupCount=backup_days,
+        encoding="utf-8",
+        delay=True,      # don't open the file until the first log record
+    )
+    handler.suffix = "%Y-%m-%d"
+    handler.setLevel(level)
+    handler.setFormatter(logging.Formatter(fmt, datefmt=_DATE_FMT))
+    return handler
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
 
 def get_logger(name: str) -> logging.Logger:
     """
-    Returns a configured logger instance.
-    Behavior changes based on APP_ENV environment variable.
+    Return a named logger, configured once.
+    Subsequent calls with the same name return the cached instance.
     """
     logger = logging.getLogger(name)
-    
-    # Prevent duplicate handlers if called multiple times
-    if logger.handlers:
+    if logger.handlers:          # already configured
         return logger
 
-    # ==========================================
-    # DEVELOPMENT CONFIGURATION
-    # ==========================================
-    if APP_ENV == "development":
-        logger.setLevel(logging.DEBUG) # Catch everything
+    env = settings.APP_ENV.lower()
+    is_prod = env == "production"
 
-        # Console Handler (Colored)
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.DEBUG)
-        console_formatter = ColoredFormatter(DEV_FORMAT, datefmt=DATE_FORMAT)
-        console_handler.setFormatter(console_formatter)
-        logger.addHandler(console_handler)
+    logger.setLevel(logging.INFO if is_prod else logging.DEBUG)
+    logger.propagate = False     # don't double-log if a root handler exists
 
-        # File Handler (Rotating)
-        # 'midnight' creates a new file every day at 00:00
-        file_handler = TimedRotatingFileHandler(
-            filename=os.path.join(LOG_DIR, "app.log"),
-            when="midnight",
-            interval=1,
-            backupCount=7, # Keep logs for 7 days
-            encoding="utf-8"
-        )
-        file_handler.suffix = "%Y-%m-%d.log" # Naming pattern: rag_app.log.2023-10-27.log
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(logging.Formatter(DEV_FORMAT, datefmt=DATE_FORMAT))
-        logger.addHandler(file_handler)
-
-    # ==========================================
-    # PRODUCTION CONFIGURATION
-    # ==========================================
+    if is_prod:
+        # Stdout only — Docker/systemd/k8s capture and rotate for you.
+        logger.addHandler(_console_handler(logging.INFO, colored=False))
     else:
-        logger.setLevel(logging.INFO) # Only important stuff
-
-        # No Console Output in Production (usually cluttering for servers)
-        # Or you can keep it simple:
-        # console_handler = logging.StreamHandler(sys.stdout)
-        # console_handler.setLevel(logging.INFO)
-        # logger.addHandler(console_handler)
-
-        # File Handler (Rotating)
-        file_handler = TimedRotatingFileHandler(
-            filename=os.path.join(LOG_DIR, "production.log"),
-            when="midnight",
-            interval=1,
-            backupCount=90, # Keep logs for 30 days in prod
-            encoding="utf-8"
-        )
-        file_handler.suffix = "%Y-%m-%d.log"
-        file_handler.setLevel(logging.INFO)
-        # Using the stricter PROD_FORMAT
-        file_handler.setFormatter(logging.Formatter(PROD_FORMAT, datefmt=DATE_FORMAT))
-        logger.addHandler(file_handler)
+        logger.addHandler(_console_handler(logging.DEBUG, colored=True))
+        logger.addHandler(_file_handler(
+            path="logs/app.log",
+            level=logging.DEBUG,
+            fmt=_DEV_FMT,
+            backup_days=7,
+        ))
 
     return logger
