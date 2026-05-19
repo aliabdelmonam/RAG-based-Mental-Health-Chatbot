@@ -22,7 +22,7 @@ except LookupError:
     nltk.download('stopwords')
 
 
-logger = get_logger(f'{__name__}:EmotionClassifier')
+logger = get_logger(f'EmotionClassifier:')
 
 # Emotion labels mapping
 EMOTION_LABELS = [
@@ -70,6 +70,13 @@ class EmotionClassifier:
         """
         logger.info(f"Initializing EmotionClassifier from: {model_path}")
         self.model_path = model_path
+        try:
+            if not os.path.exists(self.model_path):
+                raise FileNotFoundError(f"Model path '{self.model_path}' does not exist.")
+        except FileNotFoundError as e:
+            logger.error(e)
+            raise
+
         self.device = self._get_device()
         
         self.tokenizer, self.model = self._load_model()
