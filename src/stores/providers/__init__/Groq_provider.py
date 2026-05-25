@@ -1,9 +1,9 @@
 from typing import Optional
 from groq import Groq, GroqError
 
-from stores.llm.generation import LLMGenerationInterface
-from stores.llm.LLMEnums import GroqEnums
-from stores.llm.schema import (
+from stores.generation import LLMGenerationInterface
+from stores.LLMEnums import GroqEnums
+from stores.schema import (
     Message,
     GenerationConfig,
     GenerationResponse,
@@ -43,17 +43,17 @@ class GroqLLMProvider(LLMGenerationInterface):
     def __init__(
         self,
         api_key: str,
-        default_generation_model: str = DEFAULT_MODEL,
+        generation_model: str,
     ) -> None:
         """
         Args:
             api_key:                  Your Groq API key (gsk_…).
-            default_generation_model: Model used when set_generation_model()
+            generation_model: Model used when set_generation_model()
                                       is never called explicitly.
                                       Defaults to llama-3.3-70b-versatile.
         """
         self.client: Groq = Groq(api_key=api_key)
-        self._generation_model: str = default_generation_model
+        self._generation_model: str = generation_model
 
         logger.info("GroqLLMProvider initialized.")
 
