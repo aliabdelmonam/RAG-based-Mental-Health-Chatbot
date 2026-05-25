@@ -3,7 +3,8 @@ from enum import Enum
 class LLMEnum(Enum):
     OPENAI = "OPENAI"
     COHERE = "COHERE"
-    GEOQ   =  "GROQ"
+    GROQ   = "GROQ"
+    HUGGINGFACE = "HUGGINGFACE"
 
 class OpenAIEnums(Enum):
     SYSTEM = "system"
@@ -16,6 +17,11 @@ class CoHereEnums(Enum):
     ASSISTANT = "CHATBOT"
 
 class GroqEnums(Enum):
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+
+class HuggingFaceEnums(Enum):
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"

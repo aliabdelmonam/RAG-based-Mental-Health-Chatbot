@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
-
+from stores.llm.LLMGenerationInterface import LLMGenerationInterface
+from stores.llm.LLMEmbeddingInterface import LLMEmbeddingInterface
 
 
 
