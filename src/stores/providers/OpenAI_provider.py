@@ -1,9 +1,9 @@
 from typing import Optional
 from openai import OpenAI, OpenAIError
 
-from stores.llm.LLMInterface import LLMInterface
-from stores.llm.LLMEnums import OpenAIEnums
-from stores.llm.schema import (
+from stores.LLMInterface import LLMInterface
+from stores.LLMEnums import OpenAIEnums
+from stores.schema import (
     Message,
     GenerationConfig,
     GenerationResponse,

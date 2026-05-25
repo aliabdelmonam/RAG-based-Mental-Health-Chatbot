@@ -4,9 +4,9 @@ from typing import Optional
 from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError
 
-from stores.llm.LLMInterface import LLMInterface
-from stores.llm.LLMEnums import HuggingFaceEnums
-from stores.llm.schema import Message, GenerationConfig, GenerationResponse, EmbeddingResponse
+from stores.LLMInterface import LLMInterface
+from stores.LLMEnums import HuggingFaceEnums
+from stores.schema import Message, GenerationConfig, GenerationResponse, EmbeddingResponse
 from core import get_logger, get_settings
 
 logger = get_logger("HuggingFaceProvider:")
