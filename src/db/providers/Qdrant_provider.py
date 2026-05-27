@@ -1,296 +1,132 @@
 import os
-import sys
 import uuid
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
-# Ensure src is in python path to allow clean relative imports
-src_dir = str(Path(__file__).resolve().parents[2])
-if src_dir not in sys.path:
-    sys.path.append(src_dir)
+from qdrant_client import QdrantClient
+from qdrant_client.http import models as qm
 
 from core.logger import get_logger
-from db.VectorDBENUM import QDrantVectorDB
-from db.vector_db_interface import (
-    SearchResult,
-    VectorDBInterface,
-    VectorRecord,
-)
+from db.vector_db_interface import SearchResult, VectorDBInterface, VectorRecord
 
 logger = get_logger("QDrantProvider")
+QdrantClient.__del__ = lambda self: None
+# Metric name → Qdrant Distance enum
+DISTANCE_MAP = {
+    "cosine":      qm.Distance.COSINE,
+    "euclidean":   qm.Distance.EUCLID,
+    "dot_product": qm.Distance.DOT,
+    "manhattan":   qm.Distance.MANHATTAN,
+}
 
 
 class QDrantProvider(VectorDBInterface):
     """
-    Qdrant implementation of the VectorDBInterface.
+    Qdrant implementation of VectorDBInterface.
+
+    Modes (chosen automatically from arguments / env vars):
+      • in-memory  – fast, no persistence; good for testing
+      • local      – persists to disk at `path`
+      • cloud      – connects to a remote Qdrant instance via `url` + optional `api_key`
     """
 
     def __init__(
         self,
-        location: Optional[Union[str, QDrantVectorDB]] = None,
         url: Optional[str] = None,
-        port: Optional[int] = None,
-        grpc_port: int = 6334,
-        prefer_grpc: bool = False,
-        https: Optional[bool] = None,
         api_key: Optional[str] = None,
-        prefix: Optional[str] = None,
-        timeout: Optional[float] = None,
-        host: Optional[str] = None,
         path: Optional[str] = None,
+        in_memory: bool = False,
     ):
-        # Resolve location from arguments or environment
-        raw_location = location or os.getenv("QDRANT_LOCATION")
-        if isinstance(raw_location, QDrantVectorDB):
-            raw_location = raw_location.value
+        # Resolve from env vars if not provided directly
+        self.url     = url     
+        self.api_key = api_key
+        self.path    = path   
+        self.in_memory = in_memory
 
-        self.url = url or os.getenv("QDRANT_URL")
-        self.host = host or os.getenv("QDRANT_HOST")
-        self.port = (
-            port
-            or (int(os.getenv("QDRANT_PORT")) if os.getenv("QDRANT_PORT") else None)
-        )
-        self.path = path or os.getenv("QDRANT_PATH")
-        self.api_key = api_key or os.getenv("QDRANT_API_KEY")
+        self.client: Optional[QdrantClient] = None
 
-        # Map enum or string keys to proper Qdrant Client configuration
-        if raw_location == "in_memory" or raw_location == ":memory:":
-            self.location = ":memory:"
-        elif raw_location == "persistent":
-            self.location = None
-            # Default local path for persistence if not provided
-            self.path = self.path or os.path.join(
-                os.getcwd(), "data", "qdrant_db"
-            )
-        else:
-            self.location = raw_location
-
-        self.grpc_port = grpc_port
-        self.prefer_grpc = prefer_grpc
-        self.https = https
-        self.prefix = prefix
-        self.timeout = timeout
-
-        # Fallback default: if no url, host, path, or location is defined, use in-memory
-        if not any([self.location, self.url, self.host, self.path]):
-            self.location = ":memory:"
-
-        logger.info(
-            "Initializing QDrantProvider: location=%s, url=%s, host=%s, port=%s, path=%s",
-            self.location,
-            self.url,
-            self.host,
-            self.port,
-            self.path,
-        )
-        self.client = None
+    # ------------------------------------------------------------------ #
+    #  Connection                                                          #
+    # ------------------------------------------------------------------ #
 
     def connect(self) -> None:
-        """
-        Establish connection to Qdrant.
-        """
-        if self.client is not None:
+        if self.client:
             return
 
-        logger.info("Connecting to Qdrant...")
-        from qdrant_client import QdrantClient
+        if self.in_memory:
+            logger.info("Connecting to Qdrant: in-memory")
+            self.client = QdrantClient(location=":memory:")
 
-        try:
-            if self.location is not None:
-                self.client = QdrantClient(
-                    location=self.location,
-                    url=self.url,
-                    port=self.port,
-                    grpc_port=self.grpc_port,
-                    prefer_grpc=self.prefer_grpc,
-                    https=self.https,
-                    api_key=self.api_key,
-                    prefix=self.prefix,
-                    timeout=self.timeout,
-                    host=self.host,
-                    path=self.path,
-                )
-            else:
-                self.client = QdrantClient(
-                    url=self.url,
-                    host=self.host,
-                    port=self.port,
-                    path=self.path,
-                    api_key=self.api_key,
-                    timeout=self.timeout,
-                )
-            logger.info("Successfully connected to Qdrant.")
-        except Exception as e:
-            logger.error("Failed to connect to Qdrant client: %s", e)
-            raise
+        elif self.url:
+            logger.info("Connecting to Qdrant: cloud (%s)", self.url)
+            self.client = QdrantClient(url=self.url, api_key=self.api_key)
+
+        else:
+            persist_path = self.path or os.path.join(os.getcwd(), "data", "qdrant_db")
+            logger.info("Connecting to Qdrant: local (%s)", persist_path)
+            self.client = QdrantClient(path=persist_path)
 
     def disconnect(self) -> None:
-        """
-        Close the connection to Qdrant.
-        """
-        if self.client is not None:
-            logger.info("Disconnecting from Qdrant...")
+        if self.client:
             try:
                 self.client.close()
-                logger.info("Qdrant connection closed successfully.")
             except Exception as e:
-                logger.warning("Error closing Qdrant client connection: %s", e)
+                logger.warning("Error while closing Qdrant client: %s", e)
+
             self.client = None
+            logger.info("Qdrant disconnected.")
 
-    def create_collection(
-        self,
-        collection_name: str,
-        dimension: int,
-        metric: str = 'cosine',
-    ) -> None:
-        """
-        Create a Qdrant collection if it does not exist.
-        """
-        if self.client is None:
-            logger.error("Attempted create_collection without active connection.")
-            raise RuntimeError("Database not connected. Call connect() first.")
+    # ------------------------------------------------------------------ #
+    #  Collection management                                               #
+    # ------------------------------------------------------------------ #
 
-        from qdrant_client.http import models as qmodels
+    def create_collection(self, collection_name: str, dimension: int, metric: str = "cosine") -> None:
+        self._require_connection()
 
-        # distance_metric = self._map_metric(metric)
-        if metric == 'cosine':
-            distance_metric = QDrantVectorDB.COSINE.value
-        elif metric == 'euclidean':
-            distance_metric = QDrantVectorDB.EUCLIDEAN.value
-        elif metric == 'dot_product':
-            distance_metric = QDrantVectorDB.DOT_PRODUCT.value
-        elif metric == 'manhattan':
-            distance_metric = QDrantVectorDB.MANHATTAN.value
-        else:
-            raise ValueError(f"Unsupported distance metric: {metric}")
+        distance = DISTANCE_MAP.get(metric)
+        if distance is None:
+            raise ValueError(f"Unsupported metric '{metric}'. Choose from: {list(DISTANCE_MAP)}")
 
-        logger.info(
-            "Checking if Qdrant collection '%s' exists...", collection_name
-        )
-        exists = False
-        try:
-            if hasattr(self.client, "collection_exists"):
-                exists = self.client.collection_exists(collection_name)
-            else:
-                self.client.get_collection(collection_name)
-                exists = True
-        except Exception:
-            exists = False
-
+        exists = self._collection_exists(collection_name)
         if not exists:
-            logger.info(
-                "Creating collection '%s' with dimension=%d, metric=%s",
-                collection_name,
-                dimension,
-                metric,
+            self.client.create_collection(
+                collection_name=collection_name,
+                vectors_config=qm.VectorParams(size=dimension, distance=distance),
             )
-            try:
-                self.client.create_collection(
-                    collection_name=collection_name,
-                    vectors_config=qmodels.VectorParams(
-                        size=dimension, distance=distance_metric
-                    ),
-                )
-                logger.info("Collection '%s' created successfully.", collection_name)
-            except Exception as e:
-                logger.error(
-                    "Failed to create collection '%s': %s", collection_name, e
-                )
-                raise
+            logger.info("Created collection '%s' (dim=%d, metric=%s).", collection_name, dimension, metric)
         else:
             logger.info("Collection '%s' already exists.", collection_name)
 
     def delete_collection(self, collection_name: str) -> None:
-        """
-        Delete a collection from Qdrant.
-        """
-        if self.client is None:
-            logger.error("Attempted delete_collection without active connection.")
-            raise RuntimeError("Database not connected. Call connect() first.")
+        self._require_connection()
+        self.client.delete_collection(collection_name=collection_name)
+        logger.info("Deleted collection '%s'.", collection_name)
 
-        logger.warning("Deleting collection '%s' from Qdrant.", collection_name)
-        try:
-            self.client.delete_collection(collection_name=collection_name)
-            logger.info("Collection '%s' deleted successfully.", collection_name)
-        except Exception as e:
-            logger.error("Failed to delete collection '%s': %s", collection_name, e)
-            raise
+    # ------------------------------------------------------------------ #
+    #  CRUD                                                                #
+    # ------------------------------------------------------------------ #
 
     def upsert(self, collection_name: str, records: List[VectorRecord]) -> None:
-        """
-        Insert or update vector records in Qdrant.
-        """
-        if self.client is None:
-            logger.error("Attempted upsert without active connection.")
-            raise RuntimeError("Database not connected. Call connect() first.")
+        self._require_connection()
 
-        from qdrant_client.http import models as qmodels
-
-        logger.info(
-            "Upserting %d records into collection '%s'...",
-            len(records),
-            collection_name,
-        )
-        points = []
-        for record in records:
-            qdrant_id = self._to_qdrant_id(record.id)
-            payload = record.payload.copy() if record.payload else {}
-            # Store original ID to allow reverse mapping
-            payload["_original_id"] = record.id
-
-            points.append(
-                qmodels.PointStruct(
-                    id=qdrant_id, vector=record.vector, payload=payload
-                )
+        points = [
+            qm.PointStruct(
+                id=self._to_qdrant_id(r.id),
+                vector=r.vector,
+                payload={**(r.payload or {}), "_original_id": r.id},
             )
-
-        try:
-            self.client.upsert(collection_name=collection_name, points=points)
-            logger.info(
-                "Successfully upserted %d records into '%s'.",
-                len(records),
-                collection_name,
-            )
-        except Exception as e:
-            logger.error(
-                "Failed to upsert records into collection '%s': %s",
-                collection_name,
-                e,
-            )
-            raise
+            for r in records
+        ]
+        self.client.upsert(collection_name=collection_name, points=points)
+        logger.debug("Upserted %d records into '%s'.", len(records), collection_name)
 
     def delete(self, collection_name: str, ids: List[str]) -> None:
-        """
-        Delete specific records by IDs from Qdrant.
-        """
-        if self.client is None:
-            logger.error("Attempted delete without active connection.")
-            raise RuntimeError("Database not connected. Call connect() first.")
-
-        from qdrant_client.http import models as qmodels
-
-        logger.info(
-            "Deleting %d records from collection '%s'...",
-            len(ids),
-            collection_name,
+        self._require_connection()
+        qdrant_ids = [self._to_qdrant_id(i) for i in ids]
+        self.client.delete(
+            collection_name=collection_name,
+            points_selector=qm.PointIdsList(points=qdrant_ids),
         )
-        qdrant_ids = [self._to_qdrant_id(rid) for rid in ids]
-
-        try:
-            self.client.delete(
-                collection_name=collection_name,
-                points_selector=qmodels.PointIdsList(points=qdrant_ids),
-            )
-            logger.info(
-                "Successfully deleted records from '%s'.", collection_name
-            )
-        except Exception as e:
-            logger.error(
-                "Failed to delete records from collection '%s': %s",
-                collection_name,
-                e,
-            )
-            raise
+        logger.debug("Deleted %d records from '%s'.", len(ids), collection_name)
 
     def search(
         self,
@@ -300,176 +136,82 @@ class QDrantProvider(VectorDBInterface):
         filters: Optional[Dict[str, Any]] = None,
         include_vectors: bool = False,
     ) -> List[SearchResult]:
-        """
-        Perform a similarity search in Qdrant.
-        """
-        if self.client is None:
-            logger.error("Attempted search without active connection.")
-            raise RuntimeError("Database not connected. Call connect() first.")
+        self._require_connection()
 
-        logger.debug(
-            "Performing search in '%s' with limit=%d, filters=%s",
-            collection_name,
-            limit,
-            filters,
+        results = self.client.search(
+            collection_name=collection_name,
+            query_vector=query_vector,
+            limit=limit,
+            query_filter=self._build_filter(filters) if filters else None,
+            with_payload=True,
+            with_vectors=include_vectors,
         )
-        q_filter = self._map_filters(filters) if filters else None
-
-        try:
-            search_results = self.client.search(
-                collection_name=collection_name,
-                query_vector=query_vector,
-                limit=limit,
-                query_filter=q_filter,
-                with_payload=True,
-                with_vectors=include_vectors,
-            )
-            logger.debug(
-                "Search in '%s' found %d results.",
-                collection_name,
-                len(search_results),
-            )
-            return [
-                self._map_scored_point_to_result(point, include_vectors)
-                for point in search_results
-            ]
-        except Exception as e:
-            logger.error(
-                "Search failed in collection '%s': %s", collection_name, e
-            )
-            raise
+        return [self._to_search_result(p, include_vectors) for p in results]
 
     def get_by_ids(self, collection_name: str, ids: List[str]) -> List[VectorRecord]:
-        """
-        Retrieve specific records by their IDs from Qdrant.
-        """
-        if self.client is None:
-            logger.error("Attempted get_by_ids without active connection.")
-            raise RuntimeError("Database not connected. Call connect() first.")
-
-        logger.info(
-            "Retrieving %d records by IDs from collection '%s'...",
-            len(ids),
-            collection_name,
+        self._require_connection()
+        points = self.client.retrieve(
+            collection_name=collection_name,
+            ids=[self._to_qdrant_id(i) for i in ids],
+            with_payload=True,
+            with_vectors=True,
         )
-        qdrant_ids = [self._to_qdrant_id(rid) for rid in ids]
-
-        try:
-            points = self.client.retrieve(
-                collection_name=collection_name,
-                ids=qdrant_ids,
-                with_payload=True,
-                with_vectors=True,
-            )
-            logger.info("Found %d records.", len(points))
-            return [self._map_point_to_record(point) for point in points]
-        except Exception as e:
-            logger.error(
-                "Failed to retrieve records from collection '%s': %s",
-                collection_name,
-                e,
-            )
-            raise
+        return [self._to_vector_record(p) for p in points]
 
     def count(self, collection_name: str) -> int:
-        """
-        Return the total number of records in the collection.
-        """
-        if self.client is None:
-            logger.error("Attempted count without active connection.")
-            raise RuntimeError("Database not connected. Call connect() first.")
+        self._require_connection()
+        return self.client.count(collection_name=collection_name, exact=True).count
 
+    # ------------------------------------------------------------------ #
+    #  Helpers                                                             #
+    # ------------------------------------------------------------------ #
+
+    def _require_connection(self) -> None:
+        if not self.client:
+            raise RuntimeError("Not connected. Call connect() first.")
+
+    def _collection_exists(self, name: str) -> bool:
         try:
-            count_result = self.client.count(
-                collection_name=collection_name, exact=True
-            )
-            logger.debug(
-                "Count for collection '%s': %d", collection_name, count_result.count
-            )
-            return count_result.count
-        except Exception as e:
-            logger.error(
-                "Failed to count records in collection '%s': %s",
-                collection_name,
-                e,
-            )
-            raise
-
-    # Internal helper methods
+            if hasattr(self.client, "collection_exists"):
+                return self.client.collection_exists(name)
+            self.client.get_collection(name)
+            return True
+        except Exception:
+            return False
 
     def _to_qdrant_id(self, record_id: str) -> str:
-        """
-        Convert any string to a Qdrant-compliant ID (UUID or integer).
-        """
+        """Convert any string ID to a UUID (Qdrant-compatible)."""
         if record_id.isdigit():
             return str(int(record_id))
-
         try:
             uuid.UUID(record_id)
             return record_id
         except ValueError:
-            # Deterministically convert arbitrary string ID to a UUID
             return str(uuid.uuid5(uuid.NAMESPACE_DNS, record_id))
 
-
-    def _map_filters(self, filters: Dict[str, Any]) -> Any:
-        """
-        Map a flat key-value dictionary to Qdrant field conditions.
-        """
-        from qdrant_client.http import models as qmodels
-
-        must_conditions = []
-        for key, value in filters.items():
-            must_conditions.append(
-                qmodels.FieldCondition(
-                    key=key, match=qmodels.MatchValue(value=value)
-                )
-            )
-        return qmodels.Filter(must=must_conditions)
-
-    def _map_point_to_record(self, point: Any) -> VectorRecord:
-        """
-        Map a Qdrant point to VectorRecord, restoring original ID if available.
-        """
-        payload = point.payload or {}
-        original_id = payload.get("_original_id", str(point.id))
-        clean_payload = {
-            k: v for k, v in payload.items() if k != "_original_id"
-        }
-
-        vector = []
-        if hasattr(point, "vector") and point.vector is not None:
-            if isinstance(point.vector, list):
-                vector = point.vector
-            elif isinstance(point.vector, dict):
-                vector = next(iter(point.vector.values()), [])
-
-        return VectorRecord(
-            id=original_id, vector=vector, payload=clean_payload
+    def _build_filter(self, filters: Dict[str, Any]) -> qm.Filter:
+        return qm.Filter(
+            must=[
+                qm.FieldCondition(key=k, match=qm.MatchValue(value=v))
+                for k, v in filters.items()
+            ]
         )
 
-    def _map_scored_point_to_result(
-        self, point: Any, include_vector: bool
-    ) -> SearchResult:
-        """
-        Map a Qdrant scored point to SearchResult, restoring original ID if available.
-        """
+    def _to_vector_record(self, point: Any) -> VectorRecord:
         payload = point.payload or {}
-        original_id = payload.get("_original_id", str(point.id))
-        clean_payload = {
-            k: v for k, v in payload.items() if k != "_original_id"
-        }
+        original_id = payload.pop("_original_id", str(point.id))
+        vector = self._extract_vector(point)
+        return VectorRecord(id=original_id, vector=vector, payload=payload)
 
-        vector = None
-        if include_vector and hasattr(point, "vector") and point.vector is not None:
-            if isinstance(point.vector, list):
-                vector = point.vector
-            elif isinstance(point.vector, dict):
-                vector = next(iter(point.vector.values()), None)
+    def _to_search_result(self, point: Any, include_vector: bool) -> SearchResult:
+        payload = dict(point.payload or {})
+        original_id = payload.pop("_original_id", str(point.id))
+        vector = self._extract_vector(point) if include_vector else None
+        return SearchResult(id=original_id, score=point.score, payload=payload, vector=vector)
 
-        return SearchResult(
-            id=original_id,
-            score=point.score,
-            payload=clean_payload,
-            vector=vector,
-        )
+    @staticmethod
+    def _extract_vector(point: Any) -> list:
+        v = getattr(point, "vector", None)
+        if v is None:
+            return []
+        return v if isinstance(v, list) else next(iter(v.values()), [])
