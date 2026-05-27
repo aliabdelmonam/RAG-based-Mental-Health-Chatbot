@@ -222,6 +222,8 @@ __marimo__/
 # Logs
 /logs
 *.log
+app.log*
 
 # env
 *.env
+
