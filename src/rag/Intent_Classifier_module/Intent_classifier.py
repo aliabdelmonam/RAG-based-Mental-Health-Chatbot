@@ -13,8 +13,7 @@ if src_dir not in sys.path:
 from core.Config import get_settings
 from core.logger import get_logger
 from rag.Language_Detection_module.Language_detector import LanguageDetector
-from stores.llm.providers.__init__.Groq_provider import GroqLLMProvider
-from stores.llm.schema import GenerationConfig, Message
+from stores import GenerationConfig, Message
 
 settings = get_settings()
 logger = get_logger(f"IntentClassifier:")
@@ -52,11 +51,10 @@ class IntentClassifier:
 
     def __init__(
         self,
-        api_key:           str,
-        model_id:          str = "openai/gpt-oss-safeguard-20b",
+        generation_client,
         language_detector: Optional[LanguageDetector] = None,
     ) -> None:
-        self._llm = GroqLLMProvider(api_key=api_key, default_generation_model=model_id)
+        self._generation_client = generation_client
         self._language_detector = language_detector
 
         try:
@@ -82,7 +80,7 @@ class IntentClassifier:
         user_content = f'{lang_line}\nUser: "{user_message}"'
 
         messages = [Message(role="user", content=user_content)]
-        raw = self._llm.generate_text(
+        raw = self._generation_client.generate_text(
             messages=messages,
             system_prompt=self._system_prompt,
             config=self._GENERATION_CONFIG,
@@ -93,7 +91,7 @@ class IntentClassifier:
         return raw
 
     def health_check(self) -> bool:
-        return self._llm.health_check()
+        return self._generation_client.health_check()
 
     # def _parse(self, raw: str) -> IntentResult:
     #     try:
@@ -124,30 +122,30 @@ class IntentClassifier:
 
 
 if __name__ == "__main__":
-    LANG_MODEL_PATH = r"C:\Users\BS\Downloads\language_detector.pkl"
+    # LANG_MODEL_PATH = r"C:\Users\BS\Downloads\language_detector.pkl"
 
-    try:
-        lang_detector = LanguageDetector(model_path=LANG_MODEL_PATH, threshold=0.60)
-    except Exception as e:
-        logger.warning("Could not load LanguageDetector (%s) — continuing without it.", e)
-        lang_detector = None
+    # try:
+    #     lang_detector = LanguageDetector(model_path=LANG_MODEL_PATH, threshold=0.60)
+    # except Exception as e:
+    #     logger.warning("Could not load LanguageDetector (%s) — continuing without it.", e)
+    #     lang_detector = None
 
-    classifier = IntentClassifier(api_key=settings.GROQ_API_KEY, language_detector=lang_detector,model_id=settings.GENERATION_MODEL_ID)
-    test_cases = [
-        "hello, how are you?",
-        "I feel anxious all the time",
-        "شكرا جدا على مساعدتك",
-        "what's the weather like tomorrow?",
-        "bye, take care!",
-        "انا حاسس بقلق وما قادر انام",
-        "I want to hurt myself",
-        "2 + 2 = ?",
-    ]
+    # # classifier = IntentClassifier(generation_client=generation_client, language_detector=lang_detector)
+    # test_cases = [
+    #     "hello, how are you?",
+    #     "I feel anxious all the time",
+    #     "شكرا جدا على مساعدتك",
+    #     "what's the weather like tomorrow?",
+    #     "bye, take care!",
+    #     "انا حاسس بقلق وما قادر انام",
+    #     "I want to hurt myself",
+    #     "2 + 2 = ?",
+    # ]
 
-    print(f"\n{'USER MESSAGE':<40} {'INTENT':<35} {'RAG'}")
-    print("-" * 80)
-    for text in test_cases:
-        r = classifier.classify(text)
-        # print(f"{text:<40} {r.intent.value:<35} {r.requires_rag}")
-        print(f"LLM Response: {r}")
+    # print(f"\n{'USER MESSAGE':<40} {'INTENT':<35} {'RAG'}")
+    # print("-" * 80)
+    # for text in test_cases:
+    #     r = classifier.classify(text)
+    #     # print(f"{text:<40} {r.intent.value:<35} {r.requires_rag}")
+    #     print(f"LLM Response: {r}")
     print()
