@@ -1,11 +1,16 @@
 from typing import Optional
 import cohere
 from cohere import Client as CohereClient
-from cohere.errors import CohereError
+try:
+    # Cohere SDK v7+: no CohereError export; base errors are subclasses of Exception
+    from cohere.errors import CohereError  # type: ignore
+except ImportError:  # pragma: no cover
+    CohereError = Exception
 
-from stores.llm.LLMInterface import LLMInterface
-from stores.llm.LLMEnums import CoHereEnums
-from stores.llm.schema import (
+
+from stores.LLMInterface import LLMInterface
+from stores.LLMEnums import CoHereEnums
+from stores.schema import (
     Message,
     GenerationConfig,
     GenerationResponse,
