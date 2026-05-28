@@ -1,79 +1,99 @@
-# eval/evaluate_chunks_ragas.py
-import os
-import sys
-import torch
-from pathlib import Path
+# eval/eval.py
+from __future__ import annotations
+
+import pandas as pd
 from datasets import Dataset
+
 from ragas import evaluate
 from ragas.metrics import faithfulness, answer_relevancy, context_precision
-import pandas as pd
+
+from src.core import get_settings
+from src.stores import LLMProviderFactory
+from src.db import VectorDBFactory
+from src.rag import IntentClassifier, LanguageDetector, RAGPipeline
 
 
-# =====================================================================
-# STEP 1: Import dataset
-# =====================================================================
-try:
-    eval_df = pd.read_csv(r'eval\evaluation_test.csv')
-except Exception as e:
-    print(f"Error loading evaluation dataset: {e}")
-questions = eval_df["synthetic_question"].tolist()
-ground_truths = eval_df["reference_answer"].tolist()
+def main() -> None:
+    settings = get_settings()
 
-# =====================================================================
-# STEP 4: Run the RAG Generation Step Across Collections
-# =====================================================================
-# Let's say you want to evaluate your "fixed_256" chunking strategy collection
-collection_to_test = "docs_fixed_256"
+    # 1) Providers
+    llm_provider = LLMProviderFactory(settings)
+    vector_db_provider = VectorDBFactory(settings)
 
-answers = []
-contexts = []
+    generation_client = llm_provider.create(provider=settings.GENERATION_BACKEND)
+    embedding_client = llm_provider.create(provider=settings.EMBEDDING_BACKEND)
 
-print(f"\nGenerating system answers using collection: '{collection_to_test}'...")
+    generation_client.set_generation_model(settings.GENERATION_MODEL_ID)
+    embedding_client.set_embedding_model(settings.EMBEDDING_MODEL_ID)
 
-for question in questions:
-    # A. Retrieve context segments using your Qdrant provider search method
-    search_results = db.search(
-        collection_name=collection_to_test,
-        query_vector=local_embeddings.embed_query(question),
-        limit=2
+    # Health checks
+    _ = embedding_client.health_check()
+    _ = generation_client.health_check()
+
+    # Connect to vector DB
+    qdrant_client = vector_db_provider.create(provider=settings.VECTORDB_BACKEND)
+    qdrant_client.connect()
+
+    # 2) Dataset
+    eval_df = pd.read_csv(r"eval\evaluation_test.csv")
+    questions: list[str] = eval_df["synthetic_question"].astype(str).tolist()
+    ground_truths: list[str] = eval_df["reference_answer"].astype(str).tolist()
+
+    # 3) Build RAG pipeline (single-call)
+    lang_detector = LanguageDetector(
+        model_path=r"C:\Users\BS\Downloads\language_detector.pkl",
+        threshold=0.60,
     )
-    
-    # Extract text content strings from payloads
-    retrieved_chunks = [res.payload.get("text", "") for res in search_results]
-    
-    # B. Generate a response using your local LLM pipeline (Simulating your RAG generation)
-    context_str = "\n".join(retrieved_chunks)
-    prompt = f"Context:\n{context_str}\n\nQuestion: {row['question']}\nAnswer:"
-    generated_output = hf_pipeline.invoke(prompt)
-    
-    # Accumulate evaluation columns
-    questions.append(row["question"])
-    ground_truths.append(row["ground_truth"])
-    contexts.append(retrieved_chunks)
-    answers.append(generated_output)
+    intent_cls = IntentClassifier(
+        generation_client=generation_client,
+        language_detector=lang_detector,
+    )
 
-# Close database file locks cleanly
-db.disconnect()
+    pipeline = RAGPipeline(
+        generation_client=generation_client,
+        embedding_client=embedding_client,
+        vector_db_client=qdrant_client,
+        intent_classifier=intent_cls,
+        collection_name="Normal_chunking",
+        top_k=5,
+    )
 
-# =====================================================================
-# STEP 5: Compile and Execute Ragas Evaluation Benchmark
-# =====================================================================
-# Format into a Hugging Face Dataset Object
-data_dict = {
-    "question": questions,
-    "answer": answers,
-    "contexts": contexts,
-    "ground_truth": ground_truths
-}
-ragas_dataset = Dataset.from_dict(data_dict)
+    # 4) Run evaluation generation step
+    answers: list[str] = []
+    contexts: list[list[str]] = []
 
-print("\nExecuting Ragas metric matrix calculation...")
-results = evaluate(
-    dataset=ragas_dataset,
-    metrics=[faithfulness, answer_relevancy, context_precision],
-    llm=ragas_llm,
-    embeddings=ragas_embeddings
-)
+    for question in questions:
+        result = pipeline.run(question)
+        answers.append(result.answer)
 
-print("\n================ EVALUATION METRIC RESULTS ================")
-print(results)
+        # ragas expects contexts to be: List[List[str]] per sample
+        # We split the pipeline context into chunk blocks.
+        if result.context:
+            blocks = [b.strip() for b in result.context.split("\n\n") if b.strip()]
+        else:
+            blocks = []
+        contexts.append(blocks)
+
+    # 5) Compile ragas dataset
+    ragas_dataset = Dataset.from_dict(
+        {
+            "question": questions,
+            "answer": answers,
+            "contexts": contexts,
+            "ground_truth": ground_truths,
+        }
+    )
+
+    # ragas metric computation
+    results = evaluate(
+        dataset=ragas_dataset,
+        metrics=[faithfulness, answer_relevancy, context_precision],
+    )
+
+    print("\n================ EVALUATION METRIC RESULTS ================")
+    print(results)
+
+
+if __name__ == "__main__":
+    main()
+
