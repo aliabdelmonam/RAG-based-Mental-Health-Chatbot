@@ -129,23 +129,45 @@ class QDrantProvider(VectorDBInterface):
         logger.debug("Deleted %d records from '%s'.", len(ids), collection_name)
 
     def search(
-        self,
-        collection_name: str,
-        query_vector: List[float],
-        limit: int = 5,
-        filters: Optional[Dict[str, Any]] = None,
-        include_vectors: bool = False,
-    ) -> List[SearchResult]:
+    self,
+    collection_name: str,
+    query_vector: List[float],
+    limit: int = 5,
+    filters: Optional[Dict[str, Any]] = None,
+    include_vectors: bool = False,
+) -> List[SearchResult]:
         self._require_connection()
 
-        results = self.client.search(
-            collection_name=collection_name,
-            query_vector=query_vector,
-            limit=limit,
-            query_filter=self._build_filter(filters) if filters else None,
-            with_payload=True,
-            with_vectors=include_vectors,
-        )
+        query_filter = self._build_filter(filters) if filters else None
+
+        if hasattr(self.client, "query_points"):
+            # Newer qdrant-client API (v1.7+)
+            response = self.client.query_points(
+                collection_name=collection_name,
+                query=query_vector,
+                limit=limit,
+                with_payload=True,
+                with_vectors=include_vectors,
+                query_filter=query_filter,
+            )
+            results = response.points  # ← QueryResponse wraps the list here
+
+        elif hasattr(self.client, "search"):
+            # Older qdrant-client API (pre-v1.7)
+            results = self.client.search(
+                collection_name=collection_name,
+                query_vector=query_vector,
+                limit=limit,
+                query_filter=query_filter,
+                with_payload=True,
+                with_vectors=include_vectors,
+            )
+
+        else:
+            raise AttributeError(
+                "Unsupported qdrant-client version: neither 'query_points' nor 'search' found."
+            )
+
         return [self._to_search_result(p, include_vectors) for p in results]
 
     def get_by_ids(self, collection_name: str, ids: List[str]) -> List[VectorRecord]:
