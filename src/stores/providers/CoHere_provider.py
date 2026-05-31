@@ -8,15 +8,15 @@ except ImportError:  # pragma: no cover
     CohereError = Exception
 
 
-from stores.LLMInterface import LLMInterface
-from stores.LLMEnums import CoHereEnums
-from stores.schema import (
+from src.stores.LLMInterface import LLMInterface
+from src.stores.LLMEnums import CoHereEnums
+from src.stores.schema import (
     Message,
     GenerationConfig,
     GenerationResponse,
     EmbeddingResponse,
 )
-from core.logger import get_logger
+from src.core.logger import get_logger
 
 logger = get_logger(__name__)
 

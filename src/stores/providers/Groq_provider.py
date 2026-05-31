@@ -1,14 +1,13 @@
 from typing import Optional
 from groq import Groq, GroqError
-
-from stores.generation import LLMGenerationInterface
-from stores.LLMEnums import GroqEnums
-from stores.schema import (
+from src.stores.generation import LLMGenerationInterface
+from src.stores.LLMEnums import GroqEnums
+from src.stores.schema import (
     Message,
     GenerationConfig,
     GenerationResponse,
 )
-from core.logger import get_logger
+from src.core.logger import get_logger
 
 logger = get_logger(f'GroqProvider:')
 

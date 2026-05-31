@@ -25,3 +25,10 @@ class HuggingFaceEnums(Enum):
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
+
+class LLMEnum(Enum):
+    OPENAI      = "OPENAI"
+    COHERE      = "COHERE"
+    GROQ        = "GROQ"
+    HUGGINGFACE = "HUGGINGFACE"
+    COLAB       = "COLAB"          # ← add this

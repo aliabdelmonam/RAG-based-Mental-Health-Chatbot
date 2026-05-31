@@ -1,15 +1,15 @@
 from typing import Optional
 from openai import OpenAI, OpenAIError
 
-from stores.LLMInterface import LLMInterface
-from stores.LLMEnums import OpenAIEnums
-from stores.schema import (
+from src.stores.LLMInterface import LLMInterface
+from src.stores.LLMEnums import OpenAIEnums
+from src.stores.schema import (
     Message,
     GenerationConfig,
     GenerationResponse,
     EmbeddingResponse,
 )
-from core.logger import get_logger
+from src.core.logger import get_logger
 
 logger = get_logger(__name__)
 

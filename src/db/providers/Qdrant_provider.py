@@ -5,8 +5,8 @@ from typing import Any, Dict, List, Optional
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qm
 
-from core.logger import get_logger
-from db.vector_db_interface import SearchResult, VectorDBInterface, VectorRecord
+from src.core.logger import get_logger
+from src.db.vector_db_interface import SearchResult, VectorDBInterface, VectorRecord
 
 logger = get_logger("QDrantProvider")
 QdrantClient.__del__ = lambda self: None

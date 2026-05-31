@@ -1,4 +1,4 @@
-from db.vector_db_interface import VectorDBInterface
+from src.db.vector_db_interface import VectorDBInterface
 
 
 class ChromaProvider(VectorDBInterface):

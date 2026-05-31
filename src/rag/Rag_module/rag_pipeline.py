@@ -23,9 +23,9 @@ class RAGPipeline:
         generation_client,
         embedding_client,
         vector_db_client,
-        intent_classifier: IntentClassifier,
         collection_name: str,
         top_k: int = 5,
+        intent_classifier: IntentClassifier = None,
         generation_config: Optional[GenerationConfig] = None,
     ):
         self.generation_client = generation_client
@@ -40,8 +40,11 @@ class RAGPipeline:
 
     def run(self, query: str) -> RAGResult:
         # 1) Classify intent
-        intent_raw = self.intent_classifier.classify(query)
-        print(f"Intent Raw: {intent_raw}")
+        if self.intent_classifier:
+            intent_raw = self.intent_classifier.classify(query)
+            print(f"Intent Raw: {intent_raw}")
+        else:
+            intent_raw = "unknown"
 
         # 2) Embed query
         embedding_query = self.embedding_client.embed_query(query)

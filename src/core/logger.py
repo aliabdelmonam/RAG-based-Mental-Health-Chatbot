@@ -11,7 +11,7 @@ import logging
 import os
 import sys
 from logging.handlers import TimedRotatingFileHandler
-from core.Config import get_settings
+from src.core.Config import get_settings
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 _DEV_FMT  = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"

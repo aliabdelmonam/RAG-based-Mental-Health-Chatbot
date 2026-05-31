@@ -47,7 +47,7 @@ class IntentClassifier:
     """LLM-based intent classifier for a multilingual mental health chatbot."""
 
     _RAG_INTENTS       = {IntentLabel.ASKING_MENTAL_HEALTH_QUESTION}
-    _GENERATION_CONFIG = GenerationConfig(temperature=0.0, max_tokens=256)
+    _GENERATION_CONFIG = GenerationConfig(temperature=0.0, max_tokens=20000)
 
     def __init__(
         self,
