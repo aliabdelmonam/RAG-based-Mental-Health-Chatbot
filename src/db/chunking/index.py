@@ -3,10 +3,10 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from chunking import ChunkingStrategy
-from stores import LLMProviderFactory
-from core import get_settings
-from db import  VectorDBFactory
+from src.db.chunking import ChunkingStrategy
+from src.stores import LLMProviderFactory
+from src.core import get_settings
+from src.db import  VectorDBFactory
 
 settings = get_settings()
 
@@ -57,6 +57,7 @@ source_name = "mental_health_counseling_conversations.csv"
 records: list[VectorRecord] = []
 
 for i, (chunk, vector) in enumerate(zip(chunks, vectors)):
+    filtered_metadata = {k: v for k, v in chunk.metadata.items() if k != "all_answers"}
     records.append(
         VectorRecord(
             id=f"chunk_{i}",
@@ -66,8 +67,8 @@ for i, (chunk, vector) in enumerate(zip(chunks, vectors)):
                 "answer": chunk.metadata.get("all_answers"),
                 "chunk_index": i,
                 "source": source_name,
-                # also keep existing meta fields
-                **chunk.metadata,
+                # also keep existing meta fields except 'all_answers'
+                **filtered_metadata,
             },
         )
     )
