@@ -1,5 +1,5 @@
 from .LLMEnums import LLMEnum
-from .providers import CohereLLMProvider, GroqLLMProvider, HuggingFaceLLMProvider,OpenAILLMProvider,ColabLLMProvider
+from .providers import CohereLLMProvider, GroqLLMProvider, HuggingFaceLLMProvider,OpenAILLMProvider,ColabLLMProvider,GeminiLLMProvider
 
 
 class LLMProviderFactory:
@@ -11,7 +11,7 @@ class LLMProviderFactory:
         if provider == LLMEnum.OPENAI.value:
             return OpenAILLMProvider()
         elif provider == LLMEnum.COHERE.value:
-            return CohereLLMProvider()
+            return CohereLLMProvider(api_key=self.config.COHERE_API_KEY, generation_model=self.config.GENERATION_MODEL_ID, embedding_model=self.config.EMBEDDING_MODEL_ID)
         elif provider == LLMEnum.GROQ.value:
             return GroqLLMProvider(api_key=self.config.GROQ_API_KEY, generation_model=self.config.GENERATION_MODEL_ID)
         elif provider == LLMEnum.HUGGINGFACE.value:
@@ -19,6 +19,11 @@ class LLMProviderFactory:
         elif provider == LLMEnum.COLAB.value:                # ← add this
             return ColabLLMProvider(
                 base_url=self.config.COLAB_NGROK_URL,
+                generation_model=self.config.GENERATION_MODEL_ID,
+            )
+        elif provider == LLMEnum.GEMINI.value:
+            return GeminiLLMProvider(
+                api_key=self.config.GEMINI_API_KEY,
                 generation_model=self.config.GENERATION_MODEL_ID,
             )
         else:
