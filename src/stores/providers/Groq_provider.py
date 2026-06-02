@@ -42,15 +42,17 @@ class GroqLLMProvider(LLMGenerationInterface):
     def __init__(
         self,
         api_key: str,
-        generation_model: str,
     ) -> None:
         self._api_key = api_key
-        self._generation_model: str = generation_model
+        self._generation_model: str = None
         self._build_client()
         logger.info("GroqLLMProvider initialized.")
 
     def _build_client(self) -> None:
         """Instantiate (or re-instantiate) the LangChain ChatGroq client."""
+        if self._generation_model is None:
+            logger.warning("_build_client: generation model not set, use set_generation_model() to set one.")
+            return
         self.client: ChatGroq = ChatGroq(
             api_key=self._api_key,
             model=self._generation_model,
