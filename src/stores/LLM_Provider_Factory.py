@@ -17,13 +17,8 @@ class LLMProviderFactory:
         elif provider == LLMEnum.HUGGINGFACE.value:
             return HuggingFaceLLMProvider(api_key=self.config.HF_API_KEY)
         elif provider == LLMEnum.COLAB.value:                # ← add this
-            return ColabLLMProvider(
-                base_url=self.config.COLAB_NGROK_URL,
-                generation_model=self.config.GENERATION_MODEL_ID,
-            )
+            return ColabLLMProvider(base_url=self.config.COLAB_NGROK_URL)
         elif provider == LLMEnum.GEMINI.value:
-            return GeminiLLMProvider(
-                api_key=self.config.GEMINI_API_KEY,
-            )
+            return GeminiLLMProvider(api_key=self.config.GEMINI_API_KEY)
         else:
             raise ValueError(f"Unknown provider: {provider}")
