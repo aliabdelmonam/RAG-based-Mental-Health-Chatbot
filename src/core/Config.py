@@ -30,7 +30,8 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: str
 
     COLAB_NGROK_URL: str
-    
+    GEMINI_API_KEY:str
+    COHERE_API_KEY:str
     model_config = SettingsConfigDict(
         env_file=ENV_FILE_PATH,
         env_file_encoding="utf-8",
