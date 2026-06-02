@@ -20,7 +20,7 @@ class ColabLLMProvider(LLMGenerationInterface):
     response = provider.generate_text(messages=[...], system_prompt="...")
     """
 
-    def __init__(self, base_url: str, generation_model: str = "colab-hosted") -> None:
+    def __init__(self, base_url: str) -> None:
         """
         Args:
             base_url:         The ngrok public URL printed by Colab,
@@ -30,7 +30,7 @@ class ColabLLMProvider(LLMGenerationInterface):
         """
         # strip trailing slash so we can always do base_url + "/generate"
         self._base_url = base_url.rstrip("/")
-        self._generation_model = generation_model
+        # self._generation_model = generation_model
         logger.info("ColabLLMProvider initialized | url=%s model=%s", self._base_url, self._generation_model)
 
     # ── Generation Interface ──────────────────────────────────────
