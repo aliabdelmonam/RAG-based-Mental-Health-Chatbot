@@ -4,9 +4,28 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from rag import IntentClassifier, LanguageDetector
-from stores import GenerationConfig, Message
+from src.rag.Intent_Classifier_module.Intent_classifier import IntentClassifier
+from src.rag.Language_Detection_module.Language_detector import LanguageDetector
+from src.stores import GenerationConfig, Message
+from src.db import Retrieve
 
+
+import tiktoken
+
+def count_tokens(text: str, model_name: str = "gpt-4o") -> int:
+    """
+    Takes a string of text and returns the number of tokens
+    for a specific OpenAI model.
+    """
+    try:
+        # Automatically gets the correct encoding for the specified model
+        encoding = tiktoken.encoding_for_model(model_name)
+    except KeyError:
+        # Fallback to a standard cl100k_base encoding if the model isn't recognized
+        encoding = tiktoken.get_encoding("cl100k_base")
+        
+    # Encode the text and return the length of the token list
+    return len(encoding.encode(text))
 
 @dataclass
 class RAGResult:
@@ -35,8 +54,9 @@ class RAGPipeline:
         self.collection_name = collection_name
         self.top_k = top_k
         self.generation_config = generation_config or GenerationConfig(
-            temperature=0.3, max_tokens=50012
+            temperature=0.3, max_tokens=6000
         )
+        self.retrieve = Retrieve(vector_db_client)
 
     def run(self, query: str) -> RAGResult:
         # 1) Classify intent
@@ -51,20 +71,21 @@ class RAGPipeline:
         query_vector = embedding_query.embeddings[0]
 
         # 3) Retrieve top-k chunks
-        search_results = self.vector_db_client.search(
-            collection_name=self.collection_name,
+        search_results = self.retrieve.search_with(
             query_vector=query_vector,
-            limit=self.top_k,
+            collection_name=self.collection_name,
+            top_k=self.top_k,
+            top_q=3
         )
         print("Search Results:")
         for r in search_results:
             payload_items = list(r.payload.items())[:5] if r.payload else []
             payload_str = ', '.join(f"{k}={v}" for k, v in payload_items)
-            print(f"- id={r.id} score={r.score:.4f} payload: {{{payload_str}}}")
+            # print(f"- id={r.id} score={r.score:.4f} payload: {{{payload_str}}}")
 
         # 4) Build RAG context
         context = self._build_context(search_results)
-
+        print(f"Total tokens in context and query: {count_tokens(context) + count_tokens(query)}")
         # 5) Generate final answer
         answer = self._generate(query, intent_raw, context)
         print("\nRAG Response:\n", answer)
