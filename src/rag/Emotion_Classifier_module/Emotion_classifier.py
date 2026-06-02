@@ -10,11 +10,11 @@ from pathlib import Path
 
 
 # Ensure src directory is in path for module imports
-src_dir = str(Path(__file__).resolve().parents[2])  # 2 levels up to src/
-if src_dir not in sys.path:
-    sys.path.append(src_dir)
+# src_dir = str(Path(__file__).resolve().parents[2])  # 2 levels up to src/
+# if src_dir not in sys.path:
+    # sys.path.append(src_dir)
 
-from core.logger import get_logger
+from src.core.logger import get_logger
 
 try:
     nltk.data.find('corpora/stopwords')

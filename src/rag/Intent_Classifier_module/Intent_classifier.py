@@ -6,19 +6,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-src_dir = str(Path(__file__).resolve().parents[2])
-if src_dir not in sys.path:
-    sys.path.append(src_dir)
+# src_dir = str(Path(__file__).resolve().parents[2])
+# if src_dir not in sys.path:
+    # sys.path.append(src_dir)
 
-from core.Config import get_settings
-from core.logger import get_logger
-from rag.Language_Detection_module.Language_detector import LanguageDetector
-from stores import GenerationConfig, Message
+from src.core.Config import get_settings
+from src.core.logger import get_logger
+from src.rag.Language_Detection_module.Language_detector import LanguageDetector
+# print("!!! PYTHON IS EXECUTING THIS EXACT FILE !!!")
+from src.stores import GenerationConfig, Message
 
 settings = get_settings()
 logger = get_logger(f"IntentClassifier:")
 
-_PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "Intent_classifier_prompt.txt"
+_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "Intent_classifier_prompt.txt"
 _FALLBACK_PROMPT = (
     "You are an intent classifier for a mental health chatbot.\n"
     "Classify the user message into exactly one of:\n"
@@ -148,4 +149,13 @@ if __name__ == "__main__":
     #     r = classifier.classify(text)
     #     # print(f"{text:<40} {r.intent.value:<35} {r.requires_rag}")
     #     print(f"LLM Response: {r}")
-    print()
+    print("--- Testing IntentClassifier Setup ---")
+    
+    # Check if the prompt file path is resolving correctly
+    print(f"Checking prompt path: {_PROMPT_PATH}")
+    if _PROMPT_PATH.exists():
+        print("✅ Prompt file found!")
+    else:
+        print("⚠️ Prompt file NOT found. Will use fallback text.")
+        
+    print("To fully test classification here, pass your generation_client client to the class.")
