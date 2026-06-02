@@ -43,18 +43,17 @@ class CohereLLMProvider(LLMInterface):
     def __init__(
         self,
         api_key: str,
-        generation_model: str = "command-r-plus",
-        embedding_model: str = "embed-english-v3.0",
     ) -> None:
         self._api_key = api_key
-        self._generation_model = generation_model
-        self._embedding_model  = embedding_model
-        # self._build_generation_client()
-        # self._build_embedding_client()
+        self._generation_model = None
+        self._embedding_model  = None
         logger.info("CohereLLMProvider initialized.")
 
     def _build_generation_client(self) -> None:
         """Instantiate (or re-instantiate) the LangChain ChatCohere client."""
+        if self._generation_model is None:
+            logger.warning("_build_generation_client: generation model not set, use set_generation_model() to set one.")
+            return
         self.generation_client = ChatCohere(
             cohere_api_key=self._api_key,
             model=self._generation_model,
@@ -62,6 +61,9 @@ class CohereLLMProvider(LLMInterface):
 
     def _build_embedding_client(self) -> None:
         """Instantiate (or re-instantiate) the LangChain CohereEmbeddings client."""
+        if self._embedding_model is None:
+            logger.warning("_build_embedding_client: embedding model not set, use set_embedding_model() to set one.")
+            return
         self.embedding_client = CohereEmbeddings(
             cohere_api_key=self._api_key,
             model=self._embedding_model,
