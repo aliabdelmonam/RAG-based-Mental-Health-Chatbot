@@ -1,4 +1,4 @@
-from .Language_Detection_module import LanguageDetector
-from .Intent_Classifier_module import IntentClassifier
-from .Emotion_Classifier_module import EmotionClassifier
-from .Rag_module  import RAGPipeline, RAGResult
+from src.rag.Language_Detection_module.Language_detector import LanguageDetector
+from src.rag.Intent_Classifier_module.Intent_classifier import IntentClassifier
+from src.rag.Emotion_Classifier_module.Emotion_classifier import EmotionClassifier
+from src.rag.Rag_module.rag_pipeline import RAGPipeline, RAGResult

@@ -1,4 +1,4 @@
-from .Intent_classifier import IntentClassifier, IntentLabel, IntentResult
+from .Intent_classifier import IntentClassifier
 
-__all__ = ["IntentClassifier", "IntentLabel", "IntentResult"]
+# __all__ = ["IntentClassifier", "IntentLabel", "IntentResult"]
 
