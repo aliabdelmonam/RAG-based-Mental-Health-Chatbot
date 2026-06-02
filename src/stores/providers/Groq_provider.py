@@ -1,5 +1,6 @@
 from typing import Optional
-from groq import Groq, GroqError
+from langchain_groq import ChatGroq
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from src.stores.generation import LLMGenerationInterface
 from src.stores.LLMEnums import GroqEnums
 from src.stores.schema import (
@@ -14,7 +15,7 @@ logger = get_logger(f'GroqProvider:')
 
 class GroqLLMProvider(LLMGenerationInterface):
     """
-    Groq provider for ultra-fast text generation via the Groq Cloud API.
+    Groq provider for ultra-fast text generation via LangChain + Groq Cloud API.
 
     Groq does NOT expose an embeddings endpoint, so this class implements
     only LLMGenerationInterface (not the combined LLMInterface).
@@ -32,7 +33,6 @@ class GroqLLMProvider(LLMGenerationInterface):
     print(response.content)
     """
 
-    # Default model — fast and high-quality for conversational tasks
     DEFAULT_MODEL = "openai/gpt-oss-safeguard-20b"
 
     # ─────────────────────────────────────────────────────────────
@@ -44,18 +44,17 @@ class GroqLLMProvider(LLMGenerationInterface):
         api_key: str,
         generation_model: str,
     ) -> None:
-        """
-        Args:
-            api_key:                  Your Groq API key (gsk_…).
-            generation_model: Model used when set_generation_model()
-                                      is never called explicitly.
-                                      Defaults to llama-3.3-70b-versatile.
-        """
-        self.client: Groq = Groq(api_key=api_key)
+        self._api_key = api_key
         self._generation_model: str = generation_model
-
+        self._build_client()
         logger.info("GroqLLMProvider initialized.")
 
+    def _build_client(self) -> None:
+        """Instantiate (or re-instantiate) the LangChain ChatGroq client."""
+        self.client: ChatGroq = ChatGroq(
+            api_key=self._api_key,
+            model=self._generation_model,
+        )
 
     # ─────────────────────────────────────────────────────────────
     # Generation Interface
@@ -69,6 +68,7 @@ class GroqLLMProvider(LLMGenerationInterface):
             model_id,
         )
         self._generation_model = model_id
+        self._build_client()   # rebuild with new model
 
     def get_generation_model(self) -> str:
         """Return the currently active Groq model ID."""
@@ -81,11 +81,10 @@ class GroqLLMProvider(LLMGenerationInterface):
         config: Optional[GenerationConfig] = None,
     ) -> GenerationResponse:
         """
-        Send a chat-completion request to the Groq API.
+        Send a chat-completion request via LangChain + Groq.
 
         Args:
             messages:      Conversation history (user / assistant turns).
-                           Must contain at least one user message.
             system_prompt: Optional system-level instruction injected before
                            the conversation history.
             config:        Generation parameters (temperature, max_tokens, stop).
@@ -95,63 +94,69 @@ class GroqLLMProvider(LLMGenerationInterface):
             GenerationResponse with generated text and token-usage metadata.
 
         Raises:
-            RuntimeError: wraps any GroqError so callers get a clean exception.
+            RuntimeError: wraps any exception so callers get a clean exception.
         """
         if config is None:
             config = GenerationConfig()
 
-        # Build the API message list
-        api_messages: list[dict] = []
+        # ── Map internal Message objects → LangChain message types ──
+        _role_map = {
+            "system":    SystemMessage,
+            "user":      HumanMessage,
+            "assistant": AIMessage,
+        }
+
+        lc_messages = []
 
         if system_prompt:
-            api_messages.append({"role": GroqEnums.SYSTEM.value, "content": system_prompt})
+            lc_messages.append(SystemMessage(content=system_prompt))
 
-        # Map internal role names to Groq role values via GroqEnums
-        _role_map = {
-            "system":    GroqEnums.SYSTEM.value,
-            "user":      GroqEnums.USER.value,
-            "assistant": GroqEnums.ASSISTANT.value,
-        }
         for msg in messages:
-            api_messages.append({"role": _role_map.get(msg.role, msg.role), "content": msg.content})
+            msg_class = _role_map.get(msg.role, HumanMessage)
+            lc_messages.append(msg_class(content=msg.content))
 
         try:
             logger.debug(
                 "generate_text | model=%s | messages=%d | temp=%.2f | max_tokens=%d",
                 self._generation_model,
-                len(api_messages),
+                len(lc_messages),
                 config.temperature,
                 config.max_tokens,
             )
 
-            response = self.client.chat.completions.create(
-                model=self._generation_model,
-                messages=api_messages,
+            # Bind generation config at call time
+            bound_client = self.client.bind(
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
                 stop=config.stop if config.stop else None,
             )
 
-            choice = response.choices[0]
-            usage = response.usage
+            response = bound_client.invoke(lc_messages)
+
+            # ── Extract usage metadata ──────────────────────────────
+            usage = response.response_metadata.get("token_usage", {})
+            input_tokens  = usage.get("prompt_tokens", 0)
+            output_tokens = usage.get("completion_tokens", 0)
+            finish_reason = response.response_metadata.get("finish_reason", "unknown")
+            model_id      = response.response_metadata.get("model", self._generation_model)
 
             logger.info(
                 "generate_text OK | model=%s | in=%d out=%d tokens | finish=%s",
-                response.model,
-                usage.prompt_tokens,
-                usage.completion_tokens,
-                choice.finish_reason,
+                model_id,
+                input_tokens,
+                output_tokens,
+                finish_reason,
             )
 
             return GenerationResponse(
-                content=choice.message.content or "",
-                model_id=response.model,
-                input_tokens=usage.prompt_tokens,
-                output_tokens=usage.completion_tokens,
-                finish_reason=choice.finish_reason,
+                content=response.content or "",
+                model_id=model_id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                finish_reason=finish_reason,
             )
 
-        except GroqError as exc:
+        except Exception as exc:
             logger.error("generate_text FAILED | %s", exc)
             raise RuntimeError(f"Groq generation error: {exc}") from exc
 
@@ -163,20 +168,16 @@ class GroqLLMProvider(LLMGenerationInterface):
         """
         Verify the Groq API is reachable and the configured model is available.
 
-        Sends a minimal 1-token request to avoid unnecessary costs.
-
         Returns:
             True  — API responded successfully.
             False — any connectivity, auth, or model error.
         """
         try:
-            self.client.chat.completions.create(
-                model=self._generation_model,
-                messages=[{"role": "user", "content": "ping"}],
-                max_tokens=1,
+            self.client.bind(max_tokens=1).invoke(
+                [HumanMessage(content="ping")]
             )
             logger.info("health_check OK | model=%s", self._generation_model)
             return True
-        except GroqError as exc:
+        except Exception as exc:
             logger.warning("health_check FAILED | %s", exc)
             return False
