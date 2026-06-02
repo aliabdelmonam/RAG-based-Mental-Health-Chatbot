@@ -32,3 +32,9 @@ class LLMEnum(Enum):
     GROQ        = "GROQ"
     HUGGINGFACE = "HUGGINGFACE"
     COLAB       = "COLAB"          # ← add this
+    GEMINI      = "GEMINI"         # ← add this
+
+class GeminiEnums(Enum):
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
