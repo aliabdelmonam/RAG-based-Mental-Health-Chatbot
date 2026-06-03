@@ -29,7 +29,7 @@ qdrant_client.connect()
 embedding_dim = embedding_client.get_embedding_dimension()
 
 # Build chunks from the source CSV
-chunking_strategy = ChunkingStrategy(path_to_csv=r"C:\Users\BS\Desktop\mental_health_counseling_conversations.csv")
+chunking_strategy = ChunkingStrategy(path_to_csv=r"C:\Users\aliab\Downloads\mental_health_counseling_conversations.csv")
 chunks = chunking_strategy.chunk_text()
 
 if not chunks:
