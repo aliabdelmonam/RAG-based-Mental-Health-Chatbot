@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional,List
 
 from src.rag.Intent_Classifier_module.Intent_classifier import IntentClassifier
 from src.rag.Language_Detection_module.Language_detector import LanguageDetector
 from src.stores import GenerationConfig, Message
 from src.db import Retrieve
-
-
+from src.prompts import intent_system_prompt, rag_system_prompt
+from langchain_core.messages import BaseMessage,HumanMessage
 import tiktoken
 
 def count_tokens(text: str, model_name: str = "gpt-4o") -> int:
@@ -75,7 +75,7 @@ class RAGPipeline:
             query_vector=query_vector,
             collection_name=self.collection_name,
             top_k=self.top_k,
-            top_q=3
+            top_q=1
         )
         print("Search Results:")
         for r in search_results:
@@ -87,7 +87,7 @@ class RAGPipeline:
         context = self._build_context(search_results)
         print(f"Total tokens in context and query: {count_tokens(context) + count_tokens(query)}")
         # 5) Generate final answer
-        answer = self._generate(query, intent_raw, context)
+        answer = self._generate(query=query, history=[], intent_raw=intent_raw, context=context)
         print("\nRAG Response:\n", answer)
 
         return RAGResult(
@@ -112,23 +112,29 @@ class RAGPipeline:
             context_blocks.append(block)
         return "\n\n".join(context_blocks) if context_blocks else ""
 
-    def _generate(self, query: str, intent_raw: str, context: str) -> str:
-        system_prompt = (
-            "You are a mental health assistant. "
-            "Use the provided context to answer the user's question. "
-            "Be empathetic, non-judgmental, and avoid diagnosing. "
-            "If the user expresses crisis, encourage contacting local emergency services or a crisis hotline."
+    def _generate(self, query: str, history: List[BaseMessage], intent_raw: str, context: str) -> str:
+        # system_prompt = (
+        #     "You are a mental health assistant. "
+        #     "Use the provided context to answer the user's question. "
+        #     "Be empathetic, non-judgmental, and avoid diagnosing. "
+        #     "If the user expresses crisis, encourage contacting local emergency services or a crisis hotline."
+        # )
+        # user_prompt = (
+            # f"User message: {query}\n\n"
+            # f"Intent (raw): {intent_raw}\n\n"
+            # f"Retrieved context:\n{context}\n\n"
+            # "Answer the user helpfully based on the context."
+        # )
+        user_query = HumanMessage(content=query)
+        
+        # messages = [Message(role="user", content=user_prompt)]
+        full_history = history + [user_query]
+        compiled_message = rag_system_prompt.format_messages(
+            context= context,
+            chat_history= full_history,
         )
-        user_prompt = (
-            f"User message: {query}\n\n"
-            f"Intent (raw): {intent_raw}\n\n"
-            f"Retrieved context:\n{context}\n\n"
-            "Answer the user helpfully based on the context."
-        )
-        messages = [Message(role="user", content=user_prompt)]
         response = self.generation_client.generate_text(
-            messages=messages,
-            system_prompt=system_prompt,
+            messages=compiled_message,
             config=self.generation_config,
         )
         return response.content
