@@ -1,6 +1,6 @@
 from typing import Optional
 from langchain_groq import ChatGroq
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import  HumanMessage,BaseMessage
 from src.stores.generation import LLMGenerationInterface
 from src.stores.LLMEnums import GroqEnums
 from src.stores.schema import (
@@ -78,8 +78,7 @@ class GroqLLMProvider(LLMGenerationInterface):
 
     def generate_text(
         self,
-        messages: list[Message],
-        system_prompt: Optional[str] = None,
+        messages: list[BaseMessage],
         config: Optional[GenerationConfig] = None,
     ) -> GenerationResponse:
         """
@@ -102,38 +101,38 @@ class GroqLLMProvider(LLMGenerationInterface):
             config = GenerationConfig()
 
         # ── Map internal Message objects → LangChain message types ──
-        _role_map = {
-            "system":    SystemMessage,
-            "user":      HumanMessage,
-            "assistant": AIMessage,
-        }
+        # _role_map = {
+            # "system":    SystemMessage,
+            # "user":      HumanMessage,
+            # "assistant": AIMessage,
+        # }
 
-        lc_messages = []
+        # lc_messages = []
 
-        if system_prompt:
-            lc_messages.append(SystemMessage(content=system_prompt))
+        # if system_prompt:
+            # lc_messages.append(SystemMessage(content=system_prompt))
 
-        for msg in messages:
-            msg_class = _role_map.get(msg.role, HumanMessage)
-            lc_messages.append(msg_class(content=msg.content))
+        # for msg in messages:
+            # msg_class = _role_map.get(msg.role, HumanMessage)
+            # lc_messages.append(msg_class(content=msg.content))
 
         try:
             logger.debug(
-                "generate_text | model=%s | messages=%d | temp=%.2f | max_tokens=%d",
+                "generate_text | model=%s | messages=%d | temp=%.2f | max_new_tokens=%d",
                 self._generation_model,
-                len(lc_messages),
+                len(messages),
                 config.temperature,
-                config.max_tokens,
+                config.max_new_tokens,
             )
 
             # Bind generation config at call time
             bound_client = self.client.bind(
                 temperature=config.temperature,
-                max_tokens=config.max_tokens,
+                max_tokens=config.max_new_tokens,
                 stop=config.stop if config.stop else None,
             )
 
-            response = bound_client.invoke(lc_messages)
+            response = bound_client.invoke(messages)
 
             # ── Extract usage metadata ──────────────────────────────
             usage = response.response_metadata.get("token_usage", {})
