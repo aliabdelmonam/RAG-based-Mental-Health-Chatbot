@@ -29,6 +29,7 @@ RULES
 - If unsure, prefer asking_mental_health_question over out_of_scope.
 - Suicide, self-harm, or intent/thoughts of hurting oneself or anyone else MUST be classified as crisis.
 - Prioritize: crisis > asking_mental_health_question > gratitude > greeting > goodbye > out_of_scope
+- If detected_language was unkown, Answer with the same language as the query language.
 
 OUTPUT FORMAT
 -----
