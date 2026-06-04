@@ -1,14 +1,13 @@
 # rag/pipeline.py
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional,List
 
 from src.rag.Intent_Classifier_module.Intent_classifier import IntentClassifier
-from src.rag.Language_Detection_module.Language_detector import LanguageDetector
-from src.stores import GenerationConfig, Message
+from src.stores import GenerationConfig
 from src.db import Retrieve
-from src.prompts import intent_system_prompt, rag_system_prompt
+from src.prompts import  rag_system_prompt
 from langchain_core.messages import BaseMessage,HumanMessage
 import tiktoken
 
@@ -30,7 +29,7 @@ def count_tokens(text: str, model_name: str = "gpt-4o") -> int:
 @dataclass
 class RAGResult:
     query: str
-    intent: str
+    emotion: str
     retrieved_chunks: list
     context: str
     answer: str
@@ -58,13 +57,7 @@ class RAGPipeline:
         )
         self.retrieve = Retrieve(vector_db_client)
 
-    def run(self, query: str) -> RAGResult:
-        # 1) Classify intent
-        if self.intent_classifier:
-            intent_raw = self.intent_classifier.classify(query)
-            print(f"Intent Raw: {intent_raw}")
-        else:
-            intent_raw = "unknown"
+    def run(self,emotion:str ,query: str) -> RAGResult:
         
         # 2) Embed query
         embedding_query = self.embedding_client.embed_query(query)
@@ -87,13 +80,12 @@ class RAGPipeline:
         context = self._build_context(search_results)
         print(f"Total tokens in context and query: {count_tokens(context) + count_tokens(query)}")
         # 5) Generate final answer
-        answer = self._generate(query=query, history=[], intent_raw=intent_raw, context=context)
+        answer = self._generate(query=query, history=[], emotion=emotion, context=context)
         print("\nRAG Response:\n", answer)
 
         return RAGResult(
             query=query,
-            intent=intent_raw,
-            retrieved_chunks=search_results,
+            emotion=emotion,
             context=context,
             answer=answer,
         )
@@ -112,26 +104,15 @@ class RAGPipeline:
             context_blocks.append(block)
         return "\n\n".join(context_blocks) if context_blocks else ""
 
-    def _generate(self, query: str, history: List[BaseMessage], intent_raw: str, context: str) -> str:
-        # system_prompt = (
-        #     "You are a mental health assistant. "
-        #     "Use the provided context to answer the user's question. "
-        #     "Be empathetic, non-judgmental, and avoid diagnosing. "
-        #     "If the user expresses crisis, encourage contacting local emergency services or a crisis hotline."
-        # )
-        # user_prompt = (
-            # f"User message: {query}\n\n"
-            # f"Intent (raw): {intent_raw}\n\n"
-            # f"Retrieved context:\n{context}\n\n"
-            # "Answer the user helpfully based on the context."
-        # )
+    def _generate(self, query: str, history: List[BaseMessage], emotion: str, context: str) -> str:
+       
         user_query = HumanMessage(content=query)
         
-        # messages = [Message(role="user", content=user_prompt)]
         full_history = history + [user_query]
         compiled_message = rag_system_prompt.format_messages(
             context= context,
             chat_history= full_history,
+            emotion= emotion
         )
         response = self.generation_client.generate_text(
             messages=compiled_message,
