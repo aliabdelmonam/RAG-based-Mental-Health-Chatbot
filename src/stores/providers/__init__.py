@@ -5,7 +5,7 @@ from .OpenAI_provider import OpenAILLMProvider
 from .CoHere_provider import CohereLLMProvider
 
 # print("      [+] Loading Groq_provider...")
-from .Groq_provider import GroqLLMProvider
+from .Groq_provider import GroqLLMProvider,crisis_tool
 
 # print("      [+] Loading HuggingFace_provider...")
 from .HuggingFace_provider import HuggingFaceLLMProvider
