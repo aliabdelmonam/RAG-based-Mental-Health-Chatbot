@@ -65,7 +65,7 @@ class RAGPipeline:
             print(f"Intent Raw: {intent_raw}")
         else:
             intent_raw = "unknown"
-
+        
         # 2) Embed query
         embedding_query = self.embedding_client.embed_query(query)
         query_vector = embedding_query.embeddings[0]
