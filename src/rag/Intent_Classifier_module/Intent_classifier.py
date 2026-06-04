@@ -4,7 +4,7 @@ import json
 from enum import Enum
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional,List
 
 # src_dir = str(Path(__file__).resolve().parents[2])
 # if src_dir not in sys.path:
@@ -17,7 +17,7 @@ from src.rag.Language_Detection_module.Language_detector import LanguageDetector
 from src.stores import GenerationConfig
 from src.prompts import intent_system_prompt
 from src.stores import LLMProviderFactory,GenerationConfig
-
+from langchain_core.messages import BaseMessage,HumanMessage
 
 
 settings = get_settings()
@@ -71,7 +71,7 @@ class IntentClassifier:
         logger.info("IntentClassifier ready.")
 
 
-    def classify(self, user_message: str, detected_language: Optional[str] = None) -> IntentResult:
+    def classify(self, user_message: str,chat_history: List[BaseMessage], detected_language: Optional[str] = None) -> IntentResult:
         """Classify the intent of a user message, with optional language hint."""
         if not user_message or not user_message.strip():
             return self._fallback("empty input")
@@ -84,6 +84,7 @@ class IntentClassifier:
         messages = self._system_prompt.format_messages(
             detected_language= detected_language or "unknown",
             user_message= user_message,
+            recent_context=self._format_recent_context(chat_history=chat_history, k=2)
         )
 
         raw = self._generation_client.generate_text(
@@ -124,6 +125,16 @@ class IntentClassifier:
     def _fallback(raw: str) -> IntentResult:
         return IntentResult(intent=IntentLabel.OUT_OF_SCOPE, raw_response=raw, requires_rag=False)
 
+    def _format_recent_context(self,chat_history: List[BaseMessage],k: int=2) -> str:
+        if not chat_history:
+            return "No recent messages."
+        turns = chat_history[-(k * 2):]  # k user + k assistant turns
+
+        lines = []
+        for m in turns:
+            role = "User" if m.type == "human" else "Assistant"
+            lines.append(f"{role}: {m.content}")
+        return "\n".join(lines)
 
 if __name__ == "__main__":
     LANG_MODEL_PATH = r"C:\Users\aliab\Downloads\language_detector.pkl"
@@ -152,7 +163,7 @@ if __name__ == "__main__":
     print(f"\n{'USER MESSAGE':<40} {'INTENT':<35} {'RAG'}")
     print("-" * 80)
     for text in test_cases:
-        r = classifier.classify(text)
+        r = classifier.classify(text, chat_history=[])
         print(f"{text:<40} {r.intent.value:<35} {r.requires_rag}")
         print(f"LLM Response: {r}")
     print("--- Testing IntentClassifier Setup ---")
