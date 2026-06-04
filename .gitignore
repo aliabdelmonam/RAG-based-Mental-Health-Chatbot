@@ -227,3 +227,9 @@ app.log*
 # env
 *.env
 
+qdrant_data/
+
+*.csv
+
+# venv
+rag_mental_chatbot/
