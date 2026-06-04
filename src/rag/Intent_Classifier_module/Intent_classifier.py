@@ -14,7 +14,11 @@ from src.core.Config import get_settings
 from src.core.logger import get_logger
 from src.rag.Language_Detection_module.Language_detector import LanguageDetector
 # print("!!! PYTHON IS EXECUTING THIS EXACT FILE !!!")
-from src.stores import GenerationConfig, Message
+from src.stores import GenerationConfig
+from src.prompts import intent_system_prompt
+from src.stores import LLMProviderFactory,GenerationConfig
+
+
 
 settings = get_settings()
 logger = get_logger(f"IntentClassifier:")
@@ -59,7 +63,7 @@ class IntentClassifier:
         self._language_detector = language_detector
 
         try:
-            self._system_prompt = _PROMPT_PATH.read_text(encoding="utf-8").strip()
+            self._system_prompt = intent_system_prompt
         except FileNotFoundError:
             logger.warning("Prompt file not found at %s — using fallback.", _PROMPT_PATH)
             self._system_prompt = _FALLBACK_PROMPT
@@ -71,91 +75,87 @@ class IntentClassifier:
         """Classify the intent of a user message, with optional language hint."""
         if not user_message or not user_message.strip():
             return self._fallback("empty input")
-
+        
         if detected_language is None and self._language_detector is not None:
             lang_result = self._language_detector.predict(user_message)
             if lang_result.get("reliable", False):
                 detected_language = lang_result["language"]
 
-        lang_line    = f"Detected language: {detected_language or 'unknown'}"
-        user_content = f'{lang_line}\nUser: "{user_message}"'
+        messages = self._system_prompt.format_messages(
+            detected_language= detected_language or "unknown",
+            user_message= user_message,
+        )
 
-        messages = [Message(role="user", content=user_content)]
         raw = self._generation_client.generate_text(
             messages=messages,
-            system_prompt=self._system_prompt,
             config=self._GENERATION_CONFIG,
         ).content.strip()
 
         logger.debug("LLM raw response: %s", raw)
-        # return self._parse(raw)
-        return raw
+        return self._parse(raw)
 
     def health_check(self) -> bool:
         return self._generation_client.health_check()
 
-    # def _parse(self, raw: str) -> IntentResult:
-    #     try:
-    #         # Strip markdown fences, then grab the first {...} block
-    #         cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip()
-    #         match   = re.search(r"\{[^{}]+\}", cleaned, re.DOTALL)
-    #         data    = json.loads(match.group() if match else cleaned)
-    # 
-    #         intent_str = data.get("intent", "").strip().lower()
-    #         try:
-    #             intent = IntentLabel(intent_str)
-    #         except ValueError:
-    #             logger.warning("Unknown intent label '%s' — defaulting to out_of_scope.", intent_str)
-    #             intent = IntentLabel.OUT_OF_SCOPE
-    # 
-    #         requires_rag = intent in self._RAG_INTENTS
-    # 
-    #         logger.info("Classified intent: %s", intent.value)
-    #         return IntentResult(intent=intent, raw_response=raw, requires_rag=requires_rag)
-    # 
-    #     except (json.JSONDecodeError, KeyError, AttributeError) as exc:
-    #         logger.error("Failed to parse LLM response '%s': %s", raw, exc)
-    #         return self._fallback(raw)
-    # 
-    # @staticmethod
-    # def _fallback(raw: str) -> IntentResult:
-    #     return IntentResult(intent=IntentLabel.OUT_OF_SCOPE, raw_response=raw, requires_rag=False)
+    def _parse(self, raw: str) -> IntentResult:
+        try:
+            # Strip markdown fences, then grab the first {...} block
+            cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip()
+            match   = re.search(r"\{[^{}]+\}", cleaned, re.DOTALL)
+            data    = json.loads(match.group() if match else cleaned)
+    
+            intent_str = data.get("intent", "").strip().lower()
+            try:
+                intent = IntentLabel(intent_str)
+            except ValueError:
+                logger.warning("Unknown intent label '%s' — defaulting to out_of_scope.", intent_str)
+                intent = IntentLabel.OUT_OF_SCOPE
+    
+            requires_rag = intent in self._RAG_INTENTS
+    
+            logger.info("Classified intent: %s", intent.value)
+            return IntentResult(intent=intent, raw_response=raw, requires_rag=requires_rag)
+    
+        except (json.JSONDecodeError, KeyError, AttributeError) as exc:
+            logger.error("Failed to parse LLM response '%s': %s", raw, exc)
+            return self._fallback(raw)
+    
+    @staticmethod
+    def _fallback(raw: str) -> IntentResult:
+        return IntentResult(intent=IntentLabel.OUT_OF_SCOPE, raw_response=raw, requires_rag=False)
 
 
 if __name__ == "__main__":
-    # LANG_MODEL_PATH = r"C:\Users\BS\Downloads\language_detector.pkl"
+    LANG_MODEL_PATH = r"C:\Users\aliab\Downloads\language_detector.pkl"
 
-    # try:
-    #     lang_detector = LanguageDetector(model_path=LANG_MODEL_PATH, threshold=0.60)
-    # except Exception as e:
-    #     logger.warning("Could not load LanguageDetector (%s) — continuing without it.", e)
-    #     lang_detector = None
+    try:
+        lang_detector = LanguageDetector(model_path=LANG_MODEL_PATH, threshold=0.60)
+    except Exception as e:
+        logger.warning("Could not load LanguageDetector (%s) — continuing without it.", e)
+        lang_detector = None
+    llm_provider = LLMProviderFactory(settings)
+    generation_client = llm_provider.create(provider=settings.GENERATION_BACKEND)
+    generation_client.set_generation_model(settings.GENERATION_MODEL_ID)
 
-    # # classifier = IntentClassifier(generation_client=generation_client, language_detector=lang_detector)
-    # test_cases = [
-    #     "hello, how are you?",
-    #     "I feel anxious all the time",
-    #     "شكرا جدا على مساعدتك",
-    #     "what's the weather like tomorrow?",
-    #     "bye, take care!",
-    #     "انا حاسس بقلق وما قادر انام",
-    #     "I want to hurt myself",
-    #     "2 + 2 = ?",
-    # ]
+    classifier = IntentClassifier(generation_client=generation_client, language_detector=lang_detector)
+    test_cases = [
+        "hello, how are you?",
+        "I feel anxious all the time",
+        "شكرا جدا على مساعدتك",
+        "what's the weather like tomorrow?",
+        "bye, take care!",
+        "انا حاسس بقلق وما قادر انام",
+        "I want to hurt myself",
+        "2 + 2 = ?",
+    ]
 
-    # print(f"\n{'USER MESSAGE':<40} {'INTENT':<35} {'RAG'}")
-    # print("-" * 80)
-    # for text in test_cases:
-    #     r = classifier.classify(text)
-    #     # print(f"{text:<40} {r.intent.value:<35} {r.requires_rag}")
-    #     print(f"LLM Response: {r}")
+    print(f"\n{'USER MESSAGE':<40} {'INTENT':<35} {'RAG'}")
+    print("-" * 80)
+    for text in test_cases:
+        r = classifier.classify(text)
+        print(f"{text:<40} {r.intent.value:<35} {r.requires_rag}")
+        print(f"LLM Response: {r}")
     print("--- Testing IntentClassifier Setup ---")
     
-    # Check if the prompt file path is resolving correctly
-    print(f"Checking prompt path: {_PROMPT_PATH}")
-    if _PROMPT_PATH.exists():
-        print("✅ Prompt file found!")
-    else:
-        print("⚠️ Prompt file NOT found. Will use fallback text.")
         
     print("To fully test classification here, pass your generation_client client to the class.")
