@@ -10,6 +10,11 @@ from src.db import Retrieve
 from src.prompts import  rag_system_prompt
 from langchain_core.messages import BaseMessage,HumanMessage
 import tiktoken
+from src.stores.providers import crisis_tool
+from langchain_core.messages import AIMessage, ToolMessage
+from src.core.logger import get_logger
+
+logger = get_logger(f"RagPipeline:")
 
 def count_tokens(text: str, model_name: str = "gpt-4o") -> int:
     """
@@ -17,20 +22,16 @@ def count_tokens(text: str, model_name: str = "gpt-4o") -> int:
     for a specific OpenAI model.
     """
     try:
-        # Automatically gets the correct encoding for the specified model
         encoding = tiktoken.encoding_for_model(model_name)
     except KeyError:
-        # Fallback to a standard cl100k_base encoding if the model isn't recognized
         encoding = tiktoken.get_encoding("cl100k_base")
         
-    # Encode the text and return the length of the token list
     return len(encoding.encode(text))
 
 @dataclass
 class RAGResult:
     query: str
     emotion: str
-    retrieved_chunks: list
     context: str
     answer: str
 
@@ -57,8 +58,8 @@ class RAGPipeline:
         )
         self.retrieve = Retrieve(vector_db_client)
 
-    def run(self,emotion:str ,query: str) -> RAGResult:
-        
+    def run(self, emotion: str, query: str) -> RAGResult:
+
         # 2) Embed query
         embedding_query = self.embedding_client.embed_query(query)
         query_vector = embedding_query.embeddings[0]
@@ -74,20 +75,42 @@ class RAGPipeline:
         for r in search_results:
             payload_items = list(r.payload.items())[:5] if r.payload else []
             payload_str = ', '.join(f"{k}={v}" for k, v in payload_items)
-            # print(f"- id={r.id} score={r.score:.4f} payload: {{{payload_str}}}")
 
         # 4) Build RAG context
         context = self._build_context(search_results)
         print(f"Total tokens in context and query: {count_tokens(context) + count_tokens(query)}")
-        # 5) Generate final answer
-        answer = self._generate(query=query, history=[], emotion=emotion, context=context)
-        print("\nRAG Response:\n", answer)
+
+        history = []
+
+        # 5) First LLM call — LLM may respond normally or request a tool call
+        answer = self._generate(query=query, history=history, emotion=emotion, context=context, enable_tools=True)
+
+        if answer.finish_reason == "tool_call":
+            tool_calls = answer.content  # list of tool call dicts from the LLM
+
+            # Step 1: append LLM's tool_call request to history
+            history.append(AIMessage(content="", tool_calls=tool_calls))
+
+            # Step 2: execute each tool and append results to history
+            for tool_call in tool_calls:
+                logger.info(f"Executing tool: {tool_call['name']} | args: {tool_call['args']}")
+                result = crisis_tool.invoke(tool_call["args"])  # actually runs the Python function
+                logger.info(f"Tool result: {result}")
+                history.append(ToolMessage(
+                    content=result,
+                    tool_call_id=tool_call["id"]
+                ))
+
+            # Step 3: second LLM call — LLM now sees the tool result and responds to the user
+            answer = self._generate(query=query, history=history, emotion=emotion, context=context, enable_tools=False)
+
+        print("\nRAG Response:\n", answer.content)
 
         return RAGResult(
             query=query,
             emotion=emotion,
             context=context,
-            answer=answer,
+            answer=answer.content,
         )
 
     def _build_context(self, search_results: list) -> str:
@@ -104,21 +127,25 @@ class RAGPipeline:
             context_blocks.append(block)
         return "\n\n".join(context_blocks) if context_blocks else ""
 
-    def _generate(self, query: str, history: List[BaseMessage], emotion: str, context: str) -> str:
-       
+    def _generate(self, query: str, history: List[BaseMessage], emotion: str, context: str,enable_tools: bool = False) -> str:
+        """
+        Builds the full message list and calls the LLM.
+        Returns the full GenerationResponse (not just content)
+        so the caller can inspect finish_reason and tool_calls.
+        """
         user_query = HumanMessage(content=query)
-        
         full_history = history + [user_query]
         compiled_message = rag_system_prompt.format_messages(
-            context= context,
-            chat_history= full_history,
-            emotion= emotion
+            context=context,
+            chat_history=full_history,
+            emotion=emotion
         )
         response = self.generation_client.generate_text(
             messages=compiled_message,
             config=self.generation_config,
+            enable_tools=enable_tools
         )
-        return response.content
+        return response  # full GenerationResponse, not response.content
 
     @staticmethod
     def _safe_get(d: dict, key: str, default: str = "") -> str:
