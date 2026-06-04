@@ -51,5 +51,5 @@ _few_shot = FewShotChatMessagePromptTemplate(
 intent_system_prompt = ChatPromptTemplate.from_messages([
     ("system", _INSTRUCTIONS),
     _few_shot,
-    ("human", "Detected language: {detected_language}\nUser: \"{user_message}\""),
+    ("human", "Detected language: {detected_language}\nRecent context:\n{recent_context}\nUser: \"{user_message}\""),
 ])
