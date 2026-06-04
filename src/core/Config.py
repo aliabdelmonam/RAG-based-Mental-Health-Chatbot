@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     COLAB_NGROK_URL: str
     GEMINI_API_KEY:str
     COHERE_API_KEY:str
+
+    lang_detection_model:str
     model_config = SettingsConfigDict(
         env_file=ENV_FILE_PATH,
         env_file_encoding="utf-8",
