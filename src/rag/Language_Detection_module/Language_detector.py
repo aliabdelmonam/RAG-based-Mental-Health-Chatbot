@@ -23,7 +23,6 @@ class TextPreprocessor:
     def preprocess(text: str) -> str:
         if not isinstance(text, str):
             return ""
-        text = text.encode("utf-8", errors="ignore").decode("utf-8")
         # Remove punctuation, symbols, and operators (non-word and non-space characters)
         text = re.sub(r"[^\w\s]", "", text)
         # Remove digits and underscores to keep only letters
