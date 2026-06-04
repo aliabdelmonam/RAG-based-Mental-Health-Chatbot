@@ -4,7 +4,7 @@ import json
 from enum import Enum
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional,List
+from typing import Any, Optional, List
 
 # src_dir = str(Path(__file__).resolve().parents[2])
 # if src_dir not in sys.path:
@@ -51,7 +51,7 @@ class IntentResult:
 class IntentClassifier:
     """LLM-based intent classifier for a multilingual mental health chatbot."""
 
-    _RAG_INTENTS       = {IntentLabel.ASKING_MENTAL_HEALTH_QUESTION}
+    _RAG_INTENTS       = {IntentLabel.ASKING_MENTAL_HEALTH_QUESTION, IntentLabel.CRISIS}  # intents that should trigger RAG retrieval
     _GENERATION_CONFIG = GenerationConfig(temperature=0.0, max_new_tokens=6000)
 
     def __init__(
@@ -87,21 +87,23 @@ class IntentClassifier:
             recent_context=self._format_recent_context(chat_history=chat_history, k=2)
         )
 
-        raw = self._generation_client.generate_text(
+        response = self._generation_client.generate_text(
             messages=messages,
             config=self._GENERATION_CONFIG,
-        ).content.strip()
+        )
 
+        raw = response.content
         logger.debug("LLM raw response: %s", raw)
         return self._parse(raw)
 
     def health_check(self) -> bool:
         return self._generation_client.health_check()
 
-    def _parse(self, raw: str) -> IntentResult:
+    def _parse(self, raw: Any) -> IntentResult:
         try:
-            # Strip markdown fences, then grab the first {...} block
-            cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip()
+            # Normalize raw LLM output and strip markdown fences, then grab the first {...} block
+            raw_text = self._normalize_raw(raw)
+            cleaned = re.sub(r"```(?:json)?\s*|```", "", raw_text).strip()
             match   = re.search(r"\{[^{}]+\}", cleaned, re.DOTALL)
             data    = json.loads(match.group() if match else cleaned)
     
@@ -116,14 +118,26 @@ class IntentClassifier:
     
             logger.info("Classified intent: %s", intent.value)
             return IntentResult(intent=intent, raw_response=raw, requires_rag=requires_rag)
-    
+
         except (json.JSONDecodeError, KeyError, AttributeError) as exc:
             logger.error("Failed to parse LLM response '%s': %s", raw, exc)
             return self._fallback(raw)
-    
+
     @staticmethod
-    def _fallback(raw: str) -> IntentResult:
-        return IntentResult(intent=IntentLabel.OUT_OF_SCOPE, raw_response=raw, requires_rag=False)
+    def _normalize_raw(raw: Any) -> str:
+        if isinstance(raw, str):
+            return raw
+        if isinstance(raw, dict):
+            return json.dumps(raw)
+        if isinstance(raw, list):
+            if all(isinstance(item, str) for item in raw):
+                return "\n".join(raw)
+            return json.dumps(raw)
+        return str(raw)
+
+    @staticmethod
+    def _fallback(raw: Any) -> IntentResult:
+        return IntentResult(intent=IntentLabel.OUT_OF_SCOPE, raw_response=str(raw), requires_rag=False)
 
     def _format_recent_context(self,chat_history: List[BaseMessage],k: int=2) -> str:
         if not chat_history:
