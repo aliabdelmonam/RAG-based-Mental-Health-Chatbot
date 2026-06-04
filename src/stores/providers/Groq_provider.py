@@ -9,9 +9,24 @@ from src.stores.schema import (
     GenerationResponse,
 )
 from src.core.logger import get_logger
+from langchain_core.tools import tool 
 
 logger = get_logger(f'GroqProvider:')
 
+# this is a dummy function tool call, it should be calling police or something
+@tool
+def crisis_tool(query:str)-> str:
+    """
+    A tool for handling crisis situations. When invoked, it should trigger an alert to the appropriate support team or provide resources to the user.
+
+    Args:
+        query (str): The input query that may indicate a crisis situation.
+
+    Returns:
+        str: A response with appropriate resources or an alert message.
+    """
+    # Placeholder implementation - replace with actual crisis handling logic
+    return f"Alert triggered for query: {query}\n\n calling the police"
 
 class GroqLLMProvider(LLMGenerationInterface):
     """
@@ -80,6 +95,7 @@ class GroqLLMProvider(LLMGenerationInterface):
         self,
         messages: list[BaseMessage],
         config: Optional[GenerationConfig] = None,
+        enable_tools: bool = False,
     ) -> GenerationResponse:
         """
         Send a chat-completion request via LangChain + Groq.
@@ -131,8 +147,10 @@ class GroqLLMProvider(LLMGenerationInterface):
                 max_tokens=config.max_new_tokens,
                 stop=config.stop if config.stop else None,
             )
-
-            response = bound_client.invoke(messages)
+            model = bound_client
+            if enable_tools:
+                model = bound_client.bind_tools([crisis_tool])  # Register the crisis tool with the client
+            response = model.invoke(messages)
 
             # ── Extract usage metadata ──────────────────────────────
             usage = response.response_metadata.get("token_usage", {})
@@ -148,6 +166,15 @@ class GroqLLMProvider(LLMGenerationInterface):
                 output_tokens,
                 finish_reason,
             )
+            if response.tool_calls:
+                logger.info(f"Tool calls: {response.tool_calls}")
+                return GenerationResponse(
+                    content=response.tool_calls,  # carry tool_calls as content
+                    model_id=model_id,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    finish_reason="tool_call",
+                )
 
             return GenerationResponse(
                 content=response.content or "",
@@ -156,7 +183,6 @@ class GroqLLMProvider(LLMGenerationInterface):
                 output_tokens=output_tokens,
                 finish_reason=finish_reason,
             )
-
         except Exception as exc:
             logger.error("generate_text FAILED | %s", exc)
             raise RuntimeError(f"Groq generation error: {exc}") from exc
