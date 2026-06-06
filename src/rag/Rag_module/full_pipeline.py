@@ -7,7 +7,7 @@ settings = get_settings()
 from src.db import VectorDBFactory
 from typing import Optional
 from src.core.logger import get_logger
-
+from src.rag.Rag_module.conversation import ConversationHistory
 
 logger = get_logger(f"FullPipeline:")
 
@@ -43,10 +43,12 @@ class FullPipeline:
         self._lang_detector = LanguageDetector(model_path=settings.lang_detection_model, threshold=0.60)
         self.intent_classifier = IntentClassifier(generation_client=generation_client, language_detector=self._lang_detector)
 
+        self.history = ConversationHistory(max_turns=10)
+
     def run(self, query: str):
         # 1) Classify intent
         if self.intent_classifier:
-            intent_raw = self.intent_classifier.classify(query, chat_history=[])
+            intent_raw = self.intent_classifier.classify(query, chat_history=self.history.get())
             logger.info(f"Intent Raw: {intent_raw}")
         else:
             intent_raw = "unknown"
@@ -66,7 +68,7 @@ class FullPipeline:
                 generation_config=Config
             )
             emotion = 'unknown'
-            return rag_pipeline.run(emotion, query)
+            return rag_pipeline.run(emotion, query, history=self.history)
         elif intent_raw.intent == IntentLabel.OUT_OF_SCOPE:
             logger.info(f"Out of scope intent detected for query: {query}. predetermined response will be returned.")
             return "I'm sorry, but this chatbot is designed only to help with mental health questions and emotional support. I won't be able to assist with home repairs."
