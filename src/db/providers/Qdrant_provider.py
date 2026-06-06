@@ -204,8 +204,19 @@ class QDrantProvider(VectorDBInterface):
     # ------------------------------------------------------------------ #
 
     def as_retriever(self, collection_name: str, k: int = 5):
-        """Plug directly into any LCEL chain: retriever | prompt | llm"""
+        """Standard retriever — similarity search."""
         return self._get_store(collection_name).as_retriever(search_kwargs={"k": k})
+
+    def as_mmr_retriever(self, collection_name: str, k: int = 5, fetch_k: int = 20, lambda_mult: float = 0.5):
+        """
+        MMR retriever — balances relevance vs diversity.
+        fetch_k: how many candidates to pull before MMR reranking (should be > k)
+        lambda_mult: 1.0 = pure relevance, 0.0 = pure diversity
+        """
+        return self._get_store(collection_name).as_retriever(
+            search_type="mmr",
+            search_kwargs={"k": k, "fetch_k": fetch_k, "lambda_mult": lambda_mult},
+        )
 
     def get_lc_store(self, collection_name: str) -> QdrantVectorStore:
         """Expose the raw LangChain store for advanced use."""
