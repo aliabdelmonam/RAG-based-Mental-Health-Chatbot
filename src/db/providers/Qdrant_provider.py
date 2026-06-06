@@ -1,7 +1,9 @@
 import os
-import uuid
 from typing import Any, Dict, List, Optional
 
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qm
 
@@ -10,7 +12,7 @@ from src.db.vector_db_interface import SearchResult, VectorDBInterface, VectorRe
 
 logger = get_logger("QDrantProvider")
 QdrantClient.__del__ = lambda self: None
-# Metric name → Qdrant Distance enum
+
 DISTANCE_MAP = {
     "cosine":      qm.Distance.COSINE,
     "euclidean":   qm.Distance.EUCLID,
@@ -20,29 +22,23 @@ DISTANCE_MAP = {
 
 
 class QDrantProvider(VectorDBInterface):
-    """
-    Qdrant implementation of VectorDBInterface.
-
-    Modes (chosen automatically from arguments / env vars):
-      • in-memory  – fast, no persistence; good for testing
-      • local      – persists to disk at `path`
-      • cloud      – connects to a remote Qdrant instance via `url` + optional `api_key`
-    """
 
     def __init__(
         self,
+        embedding: Embeddings,           # ← real embedding client
         url: Optional[str] = None,
         api_key: Optional[str] = None,
         path: Optional[str] = None,
         in_memory: bool = False,
     ):
-        # Resolve from env vars if not provided directly
-        self.url     = url     
-        self.api_key = api_key
-        self.path    = path   
+        self.embedding = embedding
+        self.url       = url
+        self.api_key   = api_key
+        self.path      = path
         self.in_memory = in_memory
 
         self.client: Optional[QdrantClient] = None
+        self._store:  Optional[QdrantVectorStore] = None
 
     # ------------------------------------------------------------------ #
     #  Connection                                                          #
@@ -55,11 +51,9 @@ class QDrantProvider(VectorDBInterface):
         if self.in_memory:
             logger.info("Connecting to Qdrant: in-memory")
             self.client = QdrantClient(location=":memory:")
-
         elif self.url:
             logger.info("Connecting to Qdrant: cloud (%s)", self.url)
             self.client = QdrantClient(url=self.url, api_key=self.api_key)
-
         else:
             persist_path = self.path or os.path.join(os.getcwd(), "data", "qdrant_db")
             logger.info("Connecting to Qdrant: local (%s)", persist_path)
@@ -71,8 +65,8 @@ class QDrantProvider(VectorDBInterface):
                 self.client.close()
             except Exception as e:
                 logger.warning("Error while closing Qdrant client: %s", e)
-
             self.client = None
+            self._store  = None
             logger.info("Qdrant disconnected.")
 
     # ------------------------------------------------------------------ #
@@ -86,8 +80,7 @@ class QDrantProvider(VectorDBInterface):
         if distance is None:
             raise ValueError(f"Unsupported metric '{metric}'. Choose from: {list(DISTANCE_MAP)}")
 
-        exists = self._collection_exists(collection_name)
-        if not exists:
+        if not self._collection_exists(collection_name):
             self.client.create_collection(
                 collection_name=collection_name,
                 vectors_config=qm.VectorParams(size=dimension, distance=distance),
@@ -99,6 +92,7 @@ class QDrantProvider(VectorDBInterface):
     def delete_collection(self, collection_name: str) -> None:
         self._require_connection()
         self.client.delete_collection(collection_name=collection_name)
+        self._store = None
         logger.info("Deleted collection '%s'.", collection_name)
 
     # ------------------------------------------------------------------ #
@@ -106,18 +100,34 @@ class QDrantProvider(VectorDBInterface):
     # ------------------------------------------------------------------ #
 
     def upsert(self, collection_name: str, records: List[VectorRecord]) -> None:
+        """Insert pre-computed vectors directly — embedding is NOT called here."""
         self._require_connection()
 
         points = [
             qm.PointStruct(
                 id=self._to_qdrant_id(r.id),
                 vector=r.vector,
-                payload={**(r.payload or {}), "_original_id": r.id},
+                payload={
+                    **(r.payload or {}),
+                    "_original_id": r.id,
+                    # LangChain reads page_content from payload when reconstructing Documents
+                    "page_content": (r.payload or {}).get("page_content", ""),
+                },
             )
             for r in records
         ]
         self.client.upsert(collection_name=collection_name, points=points)
         logger.debug("Upserted %d records into '%s'.", len(records), collection_name)
+
+    def upsert_texts(self, collection_name: str, texts: List[str], metadatas: Optional[List[Dict]] = None) -> None:
+        """
+        LangChain-style insert: give it raw text, it embeds and stores.
+        This is the method that actually uses self.embedding.
+        """
+        self._require_connection()
+        store = self._get_store(collection_name)
+        store.add_texts(texts=texts, metadatas=metadatas or [{} for _ in texts])
+        logger.debug("Upserted %d texts into '%s'.", len(texts), collection_name)
 
     def delete(self, collection_name: str, ids: List[str]) -> None:
         self._require_connection()
@@ -128,47 +138,52 @@ class QDrantProvider(VectorDBInterface):
         )
         logger.debug("Deleted %d records from '%s'.", len(ids), collection_name)
 
+    # ------------------------------------------------------------------ #
+    #  Search                                                              #
+    # ------------------------------------------------------------------ #
+
     def search(
-    self,
-    collection_name: str,
-    query_vector: List[float],
-    limit: int = 5,
-    filters: Optional[Dict[str, Any]] = None,
-    include_vectors: bool = False,
-) -> List[SearchResult]:
+        self,
+        collection_name: str,
+        query_vector: List[float],          # pre-computed vector
+        limit: int = 5,
+        filters: Optional[Dict[str, Any]] = None,
+        include_vectors: bool = False,
+    ) -> List[SearchResult]:
+        """Search with a pre-computed vector — embedding is NOT called."""
         self._require_connection()
 
-        query_filter = self._build_filter(filters) if filters else None
+        store = self._get_store(collection_name)
+        lc_filter = self._build_filter(filters) if filters else None
 
-        if hasattr(self.client, "query_points"):
-            # Newer qdrant-client API (v1.7+)
-            response = self.client.query_points(
-                collection_name=collection_name,
-                query=query_vector,
-                limit=limit,
-                with_payload=True,
-                with_vectors=include_vectors,
-                query_filter=query_filter,
-            )
-            results = response.points  # ← QueryResponse wraps the list here
+        pairs: List[tuple[Document, float]] = store.similarity_search_by_vector_with_relevance_scores(
+            embedding=query_vector,
+            k=limit,
+            filter=lc_filter,
+        )
 
-        elif hasattr(self.client, "search"):
-            # Older qdrant-client API (pre-v1.7)
-            results = self.client.search(
-                collection_name=collection_name,
-                query_vector=query_vector,
-                limit=limit,
-                query_filter=query_filter,
-                with_payload=True,
-                with_vectors=include_vectors,
-            )
+        return [self._doc_to_search_result(doc, score) for doc, score in pairs]
 
-        else:
-            raise AttributeError(
-                "Unsupported qdrant-client version: neither 'query_points' nor 'search' found."
-            )
+    def search_by_text(
+        self,
+        collection_name: str,
+        query: str,                         # raw text — will be embedded
+        limit: int = 5,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[SearchResult]:
+        """Search with raw text — embedding IS called here."""
+        self._require_connection()
 
-        return [self._to_search_result(p, include_vectors) for p in results]
+        store = self._get_store(collection_name)
+        lc_filter = self._build_filter(filters) if filters else None
+
+        pairs: List[tuple[Document, float]] = store.similarity_search_with_relevance_scores(
+            query=query,
+            k=limit,
+            filter=lc_filter,
+        )
+
+        return [self._doc_to_search_result(doc, score) for doc, score in pairs]
 
     def get_by_ids(self, collection_name: str, ids: List[str]) -> List[VectorRecord]:
         self._require_connection()
@@ -185,8 +200,36 @@ class QDrantProvider(VectorDBInterface):
         return self.client.count(collection_name=collection_name, exact=True).count
 
     # ------------------------------------------------------------------ #
+    #  LangChain extras                                                    #
+    # ------------------------------------------------------------------ #
+
+    def as_retriever(self, collection_name: str, k: int = 5):
+        """Plug directly into any LCEL chain: retriever | prompt | llm"""
+        return self._get_store(collection_name).as_retriever(search_kwargs={"k": k})
+
+    def get_lc_store(self, collection_name: str) -> QdrantVectorStore:
+        """Expose the raw LangChain store for advanced use."""
+        return self._get_store(collection_name)
+
+    # ------------------------------------------------------------------ #
     #  Helpers                                                             #
     # ------------------------------------------------------------------ #
+
+    def _get_store(self, collection_name: str) -> QdrantVectorStore:
+        # One store instance is enough — it's just a wrapper, holds no data.
+        if not self._store:
+            self._store = QdrantVectorStore(
+                client=self.client,
+                collection_name=collection_name,
+                embedding=self.embedding,
+            )
+        return self._store
+
+    def _doc_to_search_result(self, doc: Document, score: float) -> SearchResult:
+        payload = dict(doc.metadata)
+        original_id = payload.pop("_original_id", payload.get("id", ""))
+        payload.pop("page_content", None)
+        return SearchResult(id=original_id, score=score, payload=payload, vector=None)
 
     def _require_connection(self) -> None:
         if not self.client:
@@ -202,7 +245,7 @@ class QDrantProvider(VectorDBInterface):
             return False
 
     def _to_qdrant_id(self, record_id: str) -> str:
-        """Convert any string ID to a UUID (Qdrant-compatible)."""
+        import uuid
         if record_id.isdigit():
             return str(int(record_id))
         try:
@@ -222,18 +265,6 @@ class QDrantProvider(VectorDBInterface):
     def _to_vector_record(self, point: Any) -> VectorRecord:
         payload = point.payload or {}
         original_id = payload.pop("_original_id", str(point.id))
-        vector = self._extract_vector(point)
-        return VectorRecord(id=original_id, vector=vector, payload=payload)
-
-    def _to_search_result(self, point: Any, include_vector: bool) -> SearchResult:
-        payload = dict(point.payload or {})
-        original_id = payload.pop("_original_id", str(point.id))
-        vector = self._extract_vector(point) if include_vector else None
-        return SearchResult(id=original_id, score=point.score, payload=payload, vector=vector)
-
-    @staticmethod
-    def _extract_vector(point: Any) -> list:
         v = getattr(point, "vector", None)
-        if v is None:
-            return []
-        return v if isinstance(v, list) else next(iter(v.values()), [])
+        vector = v if isinstance(v, list) else (next(iter(v.values()), []) if v else [])
+        return VectorRecord(id=original_id, vector=vector, payload=payload)
