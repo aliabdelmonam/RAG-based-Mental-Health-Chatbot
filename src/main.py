@@ -1,22 +1,48 @@
-from rag import IntentClassifier, LanguageDetector, EmotionClassifier
-from stores import LLMProviderFactory
-from core import get_settings
+from __future__ import annotations
 
-settings = get_settings()
-# Initialize LLM provider factory with config
-llm_provider = LLMProviderFactory(settings)
-
-# create LLM provider
-generation_client = llm_provider.create(provider=settings.GENERATION_BACKEND)
-
-# Initialize intent classifier with the generation client and language detector
-LanguageDetector =  LanguageDetector(model_path=r"C:\Users\BS\Downloads\language_detector.pkl", threshold=0.60)
-intent_cls = IntentClassifier(generation_client=generation_client, language_detector=LanguageDetector)
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from src.api.v1.router import api_router
 
 
-# intent_cls.health_check()
-generation_client.health_check()
-generation_client.set_generation_model(settings.GENERATION_MODEL_ID)
-result = intent_cls.classify('I have been feeling very anxious and stressed lately because of my exams.')
+from src.api.v1.endpoints.chat import qdrant_client
 
-# print(result)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Handles application startup and shutdown events.
+    Guarantees database connections only occur inside the active worker process.
+    """
+    print("🚀 [Startup] Initializing secure connections...")
+    
+    # 1. Connect to Qdrant safely inside the lifespan hook
+    qdrant_client.connect()
+    print("✅ Qdrant database connected successfully.")
+
+    # 2. Optional: Run backend health checks on startup
+    # print("🔍 Running LLM & Embedding provider health checks...")
+    # embedding_client.health_check()
+    # generation_client.health_check()
+    
+    yield  # The application is now running and ready to receive API requests
+    
+    print("🛑 [Shutdown] Cleaning up application resources...")
+
+
+# Initialize the FastAPI app with the lifespan context
+app = FastAPI(
+    title="RAG-Based Mental Health Chatbot API",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# Include API endpoints under version 1 route group
+app.include_router(api_router, prefix="/api/v1")
+
+
+@app.get("/")
+def root():
+    return {
+        "message": "Welcome to the RAG Mental Health Chatbot API. Head to /docs for Swagger UI."
+    }
