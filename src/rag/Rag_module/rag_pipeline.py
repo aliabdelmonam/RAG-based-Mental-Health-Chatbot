@@ -13,6 +13,7 @@ import tiktoken
 from src.stores.providers import crisis_tool
 from langchain_core.messages import AIMessage, ToolMessage
 from src.core.logger import get_logger
+from src.rag.Rag_module.conversation import ConversationHistory
 
 logger = get_logger(f"RagPipeline:")
 
@@ -58,7 +59,7 @@ class RAGPipeline:
         )
         self.retrieve = Retrieve(vector_db_client)
 
-    def run(self, emotion: str, query: str) -> RAGResult:
+    def run(self, emotion: str, query: str, history: ConversationHistory) -> RAGResult:
 
         # 2) Embed query
         embedding_query = self.embedding_client.embed_query(query)
@@ -79,33 +80,36 @@ class RAGPipeline:
         # 4) Build RAG context
         context = self._build_context(search_results)
         print(f"Total tokens in context and query: {count_tokens(context) + count_tokens(query)}")
-
-        history = []
+        print("Search Results:\n", search_results)
+        print("Search Results Context:\n", context)
+        lc_history = history.get()
 
         # 5) First LLM call — LLM may respond normally or request a tool call
-        answer = self._generate(query=query, history=history, emotion=emotion, context=context, enable_tools=True)
+        answer = self._generate(query=query, history=lc_history, emotion=emotion, context=context, enable_tools=True)
 
         if answer.finish_reason == "tool_call":
             tool_calls = answer.content  # list of tool call dicts from the LLM
 
             # Step 1: append LLM's tool_call request to history
-            history.append(AIMessage(content="", tool_calls=tool_calls))
+            lc_history.append(AIMessage(content="", tool_calls=tool_calls))
 
             # Step 2: execute each tool and append results to history
             for tool_call in tool_calls:
                 logger.info(f"Executing tool: {tool_call['name']} | args: {tool_call['args']}")
                 result = crisis_tool.invoke(tool_call["args"])  # actually runs the Python function
                 logger.info(f"Tool result: {result}")
-                history.append(ToolMessage(
+                lc_history.append(ToolMessage(
                     content=result,
                     tool_call_id=tool_call["id"]
                 ))
 
             # Step 3: second LLM call — LLM now sees the tool result and responds to the user
-            answer = self._generate(query=query, history=history, emotion=emotion, context=context, enable_tools=False)
+            answer = self._generate(query=query, history=lc_history, emotion=emotion, context=context, enable_tools=False)
 
+        history.add_user(query)
+        history.add_assistant(answer.content)
         print("\nRAG Response:\n", answer.content)
-
+        print(history)
         return RAGResult(
             query=query,
             emotion=emotion,
