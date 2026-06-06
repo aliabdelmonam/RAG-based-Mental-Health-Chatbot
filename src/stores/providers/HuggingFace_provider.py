@@ -1,13 +1,13 @@
-import os
 import torch
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from transformers import GenerationConfig as HFGenerationConfig
 from langchain_huggingface import HuggingFacePipeline, HuggingFaceEmbeddings, ChatHuggingFace
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
 from langchain_core.embeddings import Embeddings
+from langchain_core.tools import tool
 from src.stores.LLMInterface import LLMInterface
 from src.stores.schema import Message, GenerationConfig, GenerationResponse, EmbeddingResponse
 from src.core import get_logger, get_settings
@@ -16,7 +16,24 @@ logger = get_logger("HuggingFaceProvider:")
 settings = get_settings()
 
 
-class HuggingFaceLLMProvider(LLMInterface,Embeddings):
+# ── Tool definitions ──────────────────────────────────────────────────────────
+# Same crisis_tool as Groq — shared behavior, different backend
+@tool
+def crisis_tool(query: str) -> str:
+    """
+    A tool for handling crisis situations. When invoked, it should trigger
+    an alert to the appropriate support team or provide resources to the user.
+
+    Args:
+        query (str): The input query that may indicate a crisis situation.
+
+    Returns:
+        str: A response with appropriate resources or an alert message.
+    """
+    return f"Alert triggered for query: {query}\n\ncalling the police"
+
+
+class HuggingFaceLLMProvider(LLMInterface, Embeddings):
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
@@ -29,9 +46,12 @@ class HuggingFaceLLMProvider(LLMInterface,Embeddings):
         self._cached_config: Optional[GenerationConfig] = None
         self._embedding_dimension: Optional[int] = None
 
-    # ── Generation model management ───────────────────────────────
+        logger.info("HuggingFaceLLMProvider initialized.")
+
+    # ── Generation model management ───────────────────────────────────────────
 
     def set_generation_model(self, model_id: str) -> None:
+        logger.debug("Generation model changed: %s → %s", self._generation_model, model_id)
         self._generation_model = model_id
         self._lc_generation_pipeline = None
         self._lc_chat_model = None
@@ -44,7 +64,6 @@ class HuggingFaceLLMProvider(LLMInterface,Embeddings):
     def _build_generation_pipeline(self, config: GenerationConfig) -> None:
         local_path = self._local_path(self._generation_model)
 
-        # ✅ Determine device explicitly — never let "auto" silently pick CPU
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         logger.info("Building pipeline | model=%s | device=%s", self._generation_model, device)
 
@@ -55,22 +74,19 @@ class HuggingFaceLLMProvider(LLMInterface,Embeddings):
             )
 
         tokenizer = AutoTokenizer.from_pretrained(str(local_path))
-
         model = AutoModelForCausalLM.from_pretrained(
             str(local_path),
-            torch_dtype=torch.float16 if device != "cpu" else torch.float32,  # ✅ float16 needs CUDA
+            torch_dtype=torch.float16 if device != "cpu" else torch.float32,
             device_map=device,
         )
 
-        # ✅ All generation params in ONE place — eliminates both warnings
         model.generation_config = HFGenerationConfig(
-            max_new_tokens=config.max_new_tokens, 
+            max_new_tokens=config.max_new_tokens,
             temperature=config.temperature if config.temperature > 0 else 1.0,
             do_sample=config.temperature > 0,
             pad_token_id=tokenizer.eos_token_id,
         )
 
-        # ✅ pipeline() gets NO generation kwargs — they live in model.generation_config
         hf_pipeline = pipeline(
             "text-generation",
             model=model,
@@ -89,7 +105,7 @@ class HuggingFaceLLMProvider(LLMInterface,Embeddings):
             self._build_generation_pipeline(config)
         return self._lc_chat_model
 
-    # ── Embedding model management ────────────────────────────────
+    # ── Embedding model management ────────────────────────────────────────────
 
     def set_embedding_model(self, model_id: str) -> None:
         self._embedding_model = model_id
@@ -118,41 +134,84 @@ class HuggingFaceLLMProvider(LLMInterface,Embeddings):
         self._embedding_dimension = len(probe)
         return self._embedding_dimension
 
-    # ── Generation ────────────────────────────────────────────────
+    # ── Generation ────────────────────────────────────────────────────────────
 
     def generate_text(
         self,
-        messages: list[Message],
-        system_prompt: Optional[str] = None,
+        messages: list,
         config: Optional[GenerationConfig] = None,
+        enable_tools: bool = False,          # ← ported from Groq
     ) -> GenerationResponse:
+
         config = config or GenerationConfig()
         chat_model = self._get_chat_model(config)
 
+        # ── Normalize messages → LangChain BaseMessage ────────────
         _role_map = {"system": SystemMessage, "user": HumanMessage, "assistant": AIMessage}
-
-        lc_messages: list[BaseMessage] = []
-        if system_prompt:
-            lc_messages.append(SystemMessage(content=system_prompt))
+        lc_messages: List[BaseMessage] = []
         for msg in messages:
-            lc_messages.append(_role_map.get(msg.role, HumanMessage)(content=msg.content))
+            if isinstance(msg, BaseMessage):
+                lc_messages.append(msg)
+            else:
+                msg_class = _role_map.get(msg.role, HumanMessage)
+                lc_messages.append(msg_class(content=msg.content))
 
         try:
-            response = chat_model.invoke(lc_messages)
-            content = response.content.strip()
-            logger.info("generate_text OK | model=%s | out_chars=%d", self._generation_model, len(content))
+            logger.debug(
+                "generate_text | model=%s | messages=%d | temp=%.2f | max_new_tokens=%d",
+                self._generation_model,
+                len(lc_messages),
+                config.temperature,
+                config.max_new_tokens,
+            )
+
+            # ── Bind tools if requested ────────────────────────────
+            # NOTE: tool calling support depends on the local model's capability.
+            # Models like Qwen2.5, Llama-3.1, Mistral support it; older ones may not.
+            model = chat_model
+            if enable_tools:
+                model = chat_model.bind_tools([crisis_tool])
+
+            response = model.invoke(lc_messages)
+
+            # ── Extract usage metadata ─────────────────────────────
+            # HuggingFace local pipeline doesn't return token counts,
+            # so we default to 0 — same pattern as before
+            finish_reason = "stop"
+            if hasattr(response, "response_metadata"):
+                finish_reason = response.response_metadata.get("finish_reason", "stop")
+
+            logger.info(
+                "generate_text OK | model=%s | out_chars=%d | finish=%s",
+                self._generation_model,
+                len(str(response.content)),
+                finish_reason,
+            )
+
+            # ── Tool call detection ────────────────────────────────
+            if response.tool_calls:
+                logger.info("Tool calls: %s", response.tool_calls)
+                return GenerationResponse(
+                    content=response.tool_calls,   # carry tool_calls as content
+                    model_id=self._generation_model,
+                    input_tokens=0,
+                    output_tokens=0,
+                    finish_reason="tool_call",
+                )
+
             return GenerationResponse(
-                content=content,
+                content=response.content.strip() if response.content else "",
                 model_id=self._generation_model,
                 input_tokens=0,
                 output_tokens=0,
-                finish_reason="stop",
+                finish_reason=finish_reason,
             )
+
         except Exception as exc:
-            logger.warning("generate_text FAILED | model=%s | err=%s", self._generation_model, exc)
+            logger.error("generate_text FAILED | model=%s | err=%s", self._generation_model, exc)
             raise RuntimeError(f"HuggingFace generation error: {exc}") from exc
 
-    # ── Embedding ─────────────────────────────────────────────────
+    # ── Embedding ─────────────────────────────────────────────────────────────
 
     def embed_query(self, text: str) -> list[float]:
         return self._embed([text]).embeddings[0]
@@ -160,7 +219,7 @@ class HuggingFaceLLMProvider(LLMInterface,Embeddings):
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             raise ValueError("embed_documents: 'texts' must not be empty.")
-        return self._embed(texts).embeddings 
+        return self._embed(texts).embeddings
 
     def _embed(self, texts: list[str]) -> EmbeddingResponse:
         emb_pipeline = self._get_embedding_pipeline()
@@ -178,17 +237,27 @@ class HuggingFaceLLMProvider(LLMInterface,Embeddings):
             logger.error("_embed FAILED | model=%s | err=%s", self._embedding_model, exc)
             raise RuntimeError(f"HuggingFace embedding error: {exc}") from exc
 
-    # ── Health check ──────────────────────────────────────────────
+    # ── Health check ──────────────────────────────────────────────────────────
 
     def health_check(self) -> bool:
+        """
+        Checks whichever model is configured — generation if set, embedding otherwise.
+        Mirrors Groq's approach of actually invoking the model with a minimal prompt.
+        """
         try:
-            self._get_embedding_pipeline().embed_query("ping")
+            if self._generation_model:
+                chat_model = self._get_chat_model(GenerationConfig(max_new_tokens=1))
+                chat_model.invoke([HumanMessage(content="ping")])
+                logger.info("health_check OK | generation model=%s", self._generation_model)
+            else:
+                self._get_embedding_pipeline().embed_query("ping")
+                logger.info("health_check OK | embedding model=%s", self._embedding_model)
             return True
         except Exception as exc:
             logger.warning("health_check FAILED | err=%s", exc)
             return False
 
-    # ── Helpers ───────────────────────────────────────────────────
+    # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _local_path(self, model_id: str) -> Path:
         return Path(settings.HF_MODEL_DIR).expanduser().resolve() / model_id.replace("/", "--")
@@ -233,10 +302,8 @@ class HuggingFaceLLMProvider(LLMInterface,Embeddings):
                         resume_download=False,
                     )
                     pbar.update(repo_file.size or 0)
-
             sentinel.touch()
             logger.info("Model '%s' fully downloaded to '%s'.", model_id, local_dir)
-
         except Exception as exc:
             shutil.rmtree(local_dir, ignore_errors=True)
             raise RuntimeError(f"Download failed for '{model_id}': {exc}") from exc
