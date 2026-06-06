@@ -28,18 +28,18 @@ embedding_client.set_embedding_model(settings.EMBEDDING_MODEL_ID)
 # Create the vector DB client reference globally, but DO NOT call .connect() here!
 qdrant_client = vector_db_provider.create(provider=settings.VECTORDB_BACKEND, embedding=embedding_client)
 
-
-@router.post("/query")
-async def ask_chatbot(request_body: ChatQueryRequest):
-    """
-    Endpoint to interact with the RAG-based mental health chatbot.
-    """
-    result = FullPipeline(
+pipeline = FullPipeline(
         generation_client=generation_client,
         embedding_client=embedding_client,
         vector_db_client=qdrant_client, # Uses the client connected via main.py lifespan
         collection_name="Normal_chunking",
         top_k=1,
-    ).run(query=request_body.user_message)
+    )
+@router.post("/query")
+async def ask_chatbot(request_body: ChatQueryRequest):
+    """
+    Endpoint to interact with the RAG-based mental health chatbot.
+    """
+    result = pipeline.run(query=request_body.user_message)
 
     return {"response": result}
