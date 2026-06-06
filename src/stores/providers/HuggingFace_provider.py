@@ -1,154 +1,125 @@
-import time
-import numpy as np
+import os
+import torch
 from pathlib import Path
 from typing import Optional
-from huggingface_hub import InferenceClient
-from huggingface_hub.errors import HfHubHTTPError
 
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+from transformers import GenerationConfig as HFGenerationConfig
+from langchain_huggingface import HuggingFacePipeline, HuggingFaceEmbeddings, ChatHuggingFace
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
+from langchain_core.embeddings import Embeddings
 from src.stores.LLMInterface import LLMInterface
-from src.stores.LLMEnums import HuggingFaceEnums
 from src.stores.schema import Message, GenerationConfig, GenerationResponse, EmbeddingResponse
 from src.core import get_logger, get_settings
-
 
 logger = get_logger("HuggingFaceProvider:")
 settings = get_settings()
 
 
-class HuggingFaceLLMProvider(LLMInterface):
+class HuggingFaceLLMProvider(LLMInterface,Embeddings):
 
     def __init__(self, api_key: str) -> None:
-        self.client = InferenceClient(api_key=api_key)
-        self._generation_model = settings.GENERATION_MODEL_ID  # always stays a string
-        self._embedding_model = settings.EMBEDDING_MODEL_ID
-        self._local_model = None
-        self._local_tokenizer = None
-        self._local_embedding_model = None
+        self._api_key = api_key
+        self._generation_model: Optional[str] = None
+        self._embedding_model: Optional[str] = None
 
-        # load models from local path on startup
-        gen_path = Path(settings.HF_MODEL_DIR).expanduser().resolve() / self._generation_model.replace("/", "--")
-        emb_path = Path(settings.HF_MODEL_DIR).expanduser().resolve() / self._embedding_model.replace("/", "--")
+        self._lc_generation_pipeline: Optional[HuggingFacePipeline] = None
+        self._lc_chat_model: Optional[ChatHuggingFace] = None
+        self._lc_embedding_pipeline: Optional[HuggingFaceEmbeddings] = None
+        self._cached_config: Optional[GenerationConfig] = None
+        self._embedding_dimension: Optional[int] = None
 
-        # self._ensure_model(self._generation_model)
-        # self._load_model(local_path=gen_path)
+    # ── Generation model management ───────────────────────────────
 
-        # self._ensure_model(self._embedding_model)
-        # self._load_embedding_model(local_path=emb_path)
-
-        logger.info(
-            "HuggingFaceLLMProvider initialized. | gen_model=%s emb_model=%s",
-            self._generation_model,
-            self._embedding_model,
-        )
-
-
-    # --- generation model ---
     def set_generation_model(self, model_id: str) -> None:
-        logger.debug("Generation model changed: %s -> %s", self._generation_model, model_id)
-        model_path = Path(settings.HF_MODEL_DIR).expanduser().resolve() / model_id.replace("/", "--")
-        self._ensure_model(model_id)
         self._generation_model = model_id
-        self._load_model(local_path=model_path)
+        self._lc_generation_pipeline = None
+        self._lc_chat_model = None
+        self._cached_config = None
+        self._ensure_model(model_id)
 
     def get_generation_model(self) -> str:
         return self._generation_model
 
-    # --- embedding model ---
+    def _build_generation_pipeline(self, config: GenerationConfig) -> None:
+        local_path = self._local_path(self._generation_model)
+
+        # ✅ Determine device explicitly — never let "auto" silently pick CPU
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        logger.info("Building pipeline | model=%s | device=%s", self._generation_model, device)
+
+        if device == "cpu":
+            logger.warning(
+                "No CUDA device found — generation will be slow. "
+                "Consider switching to Groq or Cohere provider."
+            )
+
+        tokenizer = AutoTokenizer.from_pretrained(str(local_path))
+
+        model = AutoModelForCausalLM.from_pretrained(
+            str(local_path),
+            torch_dtype=torch.float16 if device != "cpu" else torch.float32,  # ✅ float16 needs CUDA
+            device_map=device,
+        )
+
+        # ✅ All generation params in ONE place — eliminates both warnings
+        model.generation_config = HFGenerationConfig(
+            max_new_tokens=config.max_new_tokens, 
+            temperature=config.temperature if config.temperature > 0 else 1.0,
+            do_sample=config.temperature > 0,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+        # ✅ pipeline() gets NO generation kwargs — they live in model.generation_config
+        hf_pipeline = pipeline(
+            "text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            return_full_text=False,
+            device_map=device,
+        )
+
+        self._lc_generation_pipeline = HuggingFacePipeline(pipeline=hf_pipeline)
+        self._lc_chat_model = ChatHuggingFace(llm=self._lc_generation_pipeline)
+        self._cached_config = config
+        logger.info("Pipeline ready | model=%s | device=%s", self._generation_model, device)
+
+    def _get_chat_model(self, config: GenerationConfig) -> ChatHuggingFace:
+        if self._lc_chat_model is None or self._cached_config != config:
+            self._build_generation_pipeline(config)
+        return self._lc_chat_model
+
+    # ── Embedding model management ────────────────────────────────
+
     def set_embedding_model(self, model_id: str) -> None:
-        logger.debug("Embedding model changed: %s -> %s", self._embedding_model, model_id)
-        model_path = Path(settings.HF_MODEL_DIR).expanduser().resolve() / model_id.replace("/", "--")
-        self._ensure_model(model_id)
         self._embedding_model = model_id
-        self._load_embedding_model(local_path=model_path)
+        self._lc_embedding_pipeline = None
+        self._embedding_dimension = None
+        self._ensure_model(model_id)
 
     def get_embedding_model(self) -> str:
         return self._embedding_model
 
-    def _load_embedding_model(self, local_path: Path) -> None:
-        logger.info("Loading local embedding model from: %s", local_path)
-        try:
-            from sentence_transformers import SentenceTransformer
-            self._local_embedding_model = SentenceTransformer(str(local_path))
-            logger.info("Embedding model loaded successfully.")
-        except Exception as exc:
-            logger.critical("Failed to load embedding model from '%s'. | Error: %s", local_path, exc)
-            raise
+    def _get_embedding_pipeline(self) -> HuggingFaceEmbeddings:
+        if self._lc_embedding_pipeline is None:
+            local_path = self._local_path(self._embedding_model)
+            logger.info("Building embedding pipeline from: %s", local_path)
+            self._lc_embedding_pipeline = HuggingFaceEmbeddings(
+                model_name=str(local_path),
+                model_kwargs={"device": "cpu"},
+                encode_kwargs={"normalize_embeddings": True},
+            )
+        return self._lc_embedding_pipeline
 
     def get_embedding_dimension(self) -> int:
-        cached = getattr(self, "_embedding_dimension", None)
-        if isinstance(cached, int) and cached > 0:
-            return cached
+        if self._embedding_dimension:
+            return self._embedding_dimension
+        probe = self._get_embedding_pipeline().embed_query("probe")
+        self._embedding_dimension = len(probe)
+        return self._embedding_dimension
 
-        if self._local_embedding_model is None:
-            raise RuntimeError("Local embedding model is not loaded.")
+    # ── Generation ────────────────────────────────────────────────
 
-        dim = self._local_embedding_model.get_sentence_embedding_dimension()
-        if not dim:
-            raise RuntimeError(f"Could not determine embedding dimension for model '{self._embedding_model}'.")
-
-        self._embedding_dimension = dim
-        return dim
-
-
-    def _ensure_model(self, model_id: str) -> None:
-        from huggingface_hub import HfApi, snapshot_download
-        from huggingface_hub.utils import RepositoryNotFoundError
-
-        local_dir = Path(settings.HF_MODEL_DIR).expanduser().resolve() / model_id.replace("/", "--")
-
-        # Already downloaded — nothing to do
-        if local_dir.exists() and any(local_dir.iterdir()):
-            logger.debug("Model '%s' already cached at '%s'.", model_id, local_dir)
-            return
-
-        # Verify it exists on the Hub before attempting download.
-        # If this fails (private/gated model, missing auth token, etc.),
-        # we log and continue so the app can still start.
-        try:
-            HfApi().model_info(model_id)
-        except RepositoryNotFoundError as exc:
-            logger.warning(
-                "_ensure_model: model_info failed (not found/private?) | model=%s | err=%s",
-                model_id,
-                exc,
-            )
-            return
-        except Exception as exc:
-            logger.warning(
-                "_ensure_model: model_info failed | model=%s | err=%s",
-                model_id,
-                exc,
-            )
-            return
-
-
-        local_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            snapshot_download(repo_id=model_id, local_dir=local_dir, resume_download=True)
-            logger.info("Starting downloading model...")
-            logger.info("Model '%s' downloaded to '%s'.", model_id, local_dir)
-        except Exception as exc:
-            logger.warning(
-                "_ensure_model: snapshot_download failed | model=%s | err=%s",
-                model_id,
-                exc,
-            )
-            return
-
-    # loading model
-    def _load_model(self, local_path: Path) -> None:
-        logger.info("Initializing local inference execution client from directory: %s", local_path)
-        try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-            self._local_tokenizer = AutoTokenizer.from_pretrained(local_path)
-            self._local_model = AutoModelForCausalLM.from_pretrained(local_path, device_map="auto")
-            logger.info("Model weights and configs successfully loaded into local execution context.")
-        except Exception as exc:
-            logger.critical("Failed to load model into memory from path '%s'. | Error: %s", local_path, exc)
-            raise exc
-
-    
-    # --- generation ---
     def generate_text(
         self,
         messages: list[Message],
@@ -156,127 +127,116 @@ class HuggingFaceLLMProvider(LLMInterface):
         config: Optional[GenerationConfig] = None,
     ) -> GenerationResponse:
         config = config or GenerationConfig()
-        api_messages: list[dict] = []
+        chat_model = self._get_chat_model(config)
 
+        _role_map = {"system": SystemMessage, "user": HumanMessage, "assistant": AIMessage}
+
+        lc_messages: list[BaseMessage] = []
         if system_prompt:
-            api_messages.append({"role": HuggingFaceEnums.SYSTEM.value, "content": system_prompt})
-
+            lc_messages.append(SystemMessage(content=system_prompt))
         for msg in messages:
-            api_messages.append({"role": getattr(HuggingFaceEnums, msg.role.upper()).value, "content": msg.content})
-
-
-        logger.debug(
-            "generate_text | model=%s | messages=%d | has_system=%s | temp=%.2f | max_tokens=%d",
-            self._generation_model,
-            len(api_messages),
-            bool(system_prompt),
-            config.temperature,
-            config.max_tokens,
-        )
+            lc_messages.append(_role_map.get(msg.role, HumanMessage)(content=msg.content))
 
         try:
-            return self._generate(api_messages, config)
+            response = chat_model.invoke(lc_messages)
+            content = response.content.strip()
+            logger.info("generate_text OK | model=%s | out_chars=%d", self._generation_model, len(content))
+            return GenerationResponse(
+                content=content,
+                model_id=self._generation_model,
+                input_tokens=0,
+                output_tokens=0,
+                finish_reason="stop",
+            )
         except Exception as exc:
-            logger.warning(
-                "generate_text FAILED | model=%s | err=%s",
-                self._generation_model,
-                exc,
-            )
-            raise
+            logger.warning("generate_text FAILED | model=%s | err=%s", self._generation_model, exc)
+            raise RuntimeError(f"HuggingFace generation error: {exc}") from exc
 
+    # ── Embedding ─────────────────────────────────────────────────
 
-    def _generate(self, api_messages: list[dict], config: GenerationConfig) -> GenerationResponse:
-        import torch
-        logger.debug("_generate | model=%s", self._generation_model)
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed([text]).embeddings[0]
 
-        tokenized = self._local_tokenizer.apply_chat_template(
-            api_messages,
-            add_generation_prompt=True,
-            return_tensors="pt",
-            return_dict=False,  # force plain tensor, not BatchEncoding
-        )
-
-        # apply_chat_template with return_dict=False always returns a plain tensor
-        input_ids = tokenized.to(self._local_model.device)
-        input_token_count = input_ids.shape[-1]
-
-        with torch.no_grad():
-            output_ids = self._local_model.generate(
-                input_ids,
-                max_new_tokens=config.max_tokens,
-                temperature=config.temperature,
-                do_sample=config.temperature > 0,
-                pad_token_id=self._local_tokenizer.eos_token_id,
-            )
-
-        new_tokens = output_ids[0][input_token_count:]
-        content = self._local_tokenizer.decode(new_tokens, skip_special_tokens=True)
-        output_token_count = len(new_tokens)
-
-        logger.info(
-            "generate_text OK | model=%s | in=%d out=%d tokens",
-            self._generation_model, input_token_count, output_token_count,
-        )
-        return GenerationResponse(
-            content=content,
-            model_id=self._generation_model,
-            input_tokens=input_token_count,
-            output_tokens=output_token_count,
-            finish_reason="stop",
-        )
-
-
-    # --- embedding ---
-    def embed_query(self, text: str) -> EmbeddingResponse:
-        return self._embed(text)
-
-    def embed_documents(self, texts: list[str]) -> EmbeddingResponse:
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             raise ValueError("embed_documents: 'texts' must not be empty.")
+        return self._embed(texts).embeddings 
 
-        logger.debug(
-            "embed_documents | model=%s | n_texts=%d",
-            self._embedding_model,
-            len(texts),
-        )
-
+    def _embed(self, texts: list[str]) -> EmbeddingResponse:
+        emb_pipeline = self._get_embedding_pipeline()
         try:
-            return self._embed(texts)
-        except Exception as exc:
-            logger.warning(
-                "embed_documents FAILED | model=%s | err=%s",
-                self._embedding_model,
-                exc,
+            vectors = (
+                [emb_pipeline.embed_query(texts[0])]
+                if len(texts) == 1
+                else emb_pipeline.embed_documents(texts)
             )
-            raise
+            dim = len(vectors[0]) if vectors else 0
+            if not self._embedding_dimension and dim:
+                self._embedding_dimension = dim
+            return EmbeddingResponse(embeddings=vectors, model_id=self._embedding_model, dimension=dim)
+        except Exception as exc:
+            logger.error("_embed FAILED | model=%s | err=%s", self._embedding_model, exc)
+            raise RuntimeError(f"HuggingFace embedding error: {exc}") from exc
 
-    def _embed(self, texts) -> EmbeddingResponse:
-        if self._local_embedding_model is None:
-            raise RuntimeError("Local embedding model is not loaded.")
+    # ── Health check ──────────────────────────────────────────────
 
-        input_texts = [texts] if isinstance(texts, str) else texts
-        logger.debug("_embed | model=%s | n_texts=%d", self._embedding_model, len(input_texts))
-
-        vectors = self._local_embedding_model.encode(input_texts, convert_to_numpy=True).tolist()
-        dim = len(vectors[0]) if vectors else 0
-
-        logger.info("_embed OK | model=%s | n=%d | dim=%d", self._embedding_model, len(vectors), dim)
-        return EmbeddingResponse(embeddings=vectors, model_id=self._embedding_model, dimension=dim)
-
-    # --- health ---
     def health_check(self) -> bool:
-        logger.debug("health_check | gen_model=%s emb_model=%s", self._generation_model, self._embedding_model)
         try:
-            # check local model is loaded
-            if getattr(self, "_local_model", None) is None or getattr(self, "_local_tokenizer", None) is None:
-                raise RuntimeError("Local generation model is not loaded.")
-
-            # check local embedding model is loaded
-            if getattr(self, "_local_embedding_model", None) is None:
-                raise RuntimeError("Local embedding model is not loaded.")
-
-            logger.info("health_check OK | gen=%s emb=%s", self._generation_model, self._embedding_model)
+            self._get_embedding_pipeline().embed_query("ping")
             return True
         except Exception as exc:
-            logger.warning("health_check FAILED | gen=%s emb=%s | err=%s", self._generation_model, self._embedding_model, exc)
+            logger.warning("health_check FAILED | err=%s", exc)
             return False
+
+    # ── Helpers ───────────────────────────────────────────────────
+
+    def _local_path(self, model_id: str) -> Path:
+        return Path(settings.HF_MODEL_DIR).expanduser().resolve() / model_id.replace("/", "--")
+
+    def _ensure_model(self, model_id: str) -> None:
+        from huggingface_hub import HfApi, hf_hub_download
+        from huggingface_hub.utils import RepositoryNotFoundError
+        from tqdm import tqdm
+        import shutil
+
+        local_dir = self._local_path(model_id)
+        sentinel = local_dir / ".download_complete"
+
+        if sentinel.exists():
+            logger.debug("Model '%s' already cached.", model_id)
+            return
+
+        try:
+            model_info = HfApi().model_info(model_id, files_metadata=True)
+        except RepositoryNotFoundError as exc:
+            raise ValueError(f"Model '{model_id}' not found on HuggingFace Hub.") from exc
+        except Exception as exc:
+            raise RuntimeError(f"Could not reach HuggingFace Hub: {exc}") from exc
+
+        if local_dir.exists():
+            logger.warning("Incomplete download found for '%s', wiping.", model_id)
+            shutil.rmtree(local_dir)
+        local_dir.mkdir(parents=True, exist_ok=True)
+
+        siblings = model_info.siblings or []
+        total_bytes = sum(f.size or 0 for f in siblings)
+        logger.info("Downloading '%s' — %d files, %.1f GB", model_id, len(siblings), total_bytes / 1e9)
+
+        try:
+            with tqdm(total=total_bytes, unit="B", unit_scale=True, unit_divisor=1024,
+                      desc=model_id.split("/")[-1]) as pbar:
+                for repo_file in siblings:
+                    hf_hub_download(
+                        repo_id=model_id,
+                        filename=repo_file.rfilename,
+                        local_dir=str(local_dir),
+                        resume_download=False,
+                    )
+                    pbar.update(repo_file.size or 0)
+
+            sentinel.touch()
+            logger.info("Model '%s' fully downloaded to '%s'.", model_id, local_dir)
+
+        except Exception as exc:
+            shutil.rmtree(local_dir, ignore_errors=True)
+            raise RuntimeError(f"Download failed for '{model_id}': {exc}") from exc
