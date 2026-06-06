@@ -156,7 +156,10 @@ class QDrantProvider(VectorDBInterface):
         store = self._get_store(collection_name)
         lc_filter = self._build_filter(filters) if filters else None
 
-        pairs: List[tuple[Document, float]] = store.similarity_search_by_vector_with_relevance_scores(
+        # print("SUIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII")
+        # print([m for m in dir(store) if 'search' in m.lower()])
+
+        pairs: List[tuple[Document, float]] = store.similarity_search_with_score_by_vector (
             embedding=query_vector,
             k=limit,
             filter=lc_filter,
@@ -177,7 +180,7 @@ class QDrantProvider(VectorDBInterface):
         store = self._get_store(collection_name)
         lc_filter = self._build_filter(filters) if filters else None
 
-        pairs: List[tuple[Document, float]] = store.similarity_search_with_relevance_scores(
+        pairs: List[tuple[Document, float]] = store.similarity_search_by_vector_with_score(
             query=query,
             k=limit,
             filter=lc_filter,
