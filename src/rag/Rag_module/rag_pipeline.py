@@ -62,7 +62,7 @@ class RAGPipeline:
 
         # 2) Embed query
         embedding_query = self.embedding_client.embed_query(query)
-        query_vector = embedding_query.embeddings[0]
+        query_vector = embedding_query
 
         # 3) Retrieve top-k chunks
         search_results = self.retrieve.search_with(
