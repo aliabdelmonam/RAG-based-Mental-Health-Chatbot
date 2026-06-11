@@ -52,7 +52,7 @@ class FullPipeline:
         if intent_raw.requires_rag or intent_raw=='unknown':
 
             logger.info(f"Running RAG Pipeline for query: {query}")
-            Config = GenerationConfig(max_new_tokens=100, temperature=0.3)
+            Config = GenerationConfig(max_new_tokens=6000, temperature=0.3)
             rag_pipeline = RAGPipeline(
                 client = self.client,
                 intent_classifier=self.intent_classifier,

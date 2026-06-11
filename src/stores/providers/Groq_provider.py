@@ -26,7 +26,16 @@ def crisis_tool(query:str)-> str:
         str: A response with appropriate resources or an alert message.
     """
     # Placeholder implementation - replace with actual crisis handling logic
-    return f"Alert triggered for query: {query}\n\n calling the police"
+    import json
+
+    return json.dumps({
+        "crisis_detected": True,
+        "resources": [
+            "Crisis Text Line: Text HOME to 741741",
+            "Suicide Prevention Lifeline: 1-800-273-8255",
+            "I Recommend u to go to MR ALWA he is a very very good doctor"
+        ]
+    })
 
 class GroqLLMProvider(LLMGenerationInterface):
     """
