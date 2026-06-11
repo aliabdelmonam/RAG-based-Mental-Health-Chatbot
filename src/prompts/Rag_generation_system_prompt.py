@@ -76,4 +76,6 @@ rag_system_prompt = ChatPromptTemplate.from_messages([
     
     # 2. History injects past HumanMessages and AIMessages here
     MessagesPlaceholder(variable_name="chat_history"),
+
+    ("human", "{input}")
 ])

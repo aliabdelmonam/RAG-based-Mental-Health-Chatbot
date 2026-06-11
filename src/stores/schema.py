@@ -23,7 +23,7 @@ class GenerationConfig:
     - moderate tokens  → complete answers without rambling
     """
     temperature: float       = 0.3
-    max_new_tokens:  int         = 1024
+    max_output_tokens :  int         = 1024
     stop:        list[str]   = field(default_factory=list)
 
 

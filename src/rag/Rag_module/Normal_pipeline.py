@@ -24,7 +24,7 @@ class NormalPipeline:
     ):
         # self.generation_client = generation_client
         self.generation_config = generation_config or GenerationConfig(
-            temperature=0.3, max_tokens=6000
+            temperature=0.3, max_output_tokens =6000
         )
         self.client = client
     def run(self ,query: str) -> NormalResult:

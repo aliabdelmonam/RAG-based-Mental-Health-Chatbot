@@ -51,7 +51,7 @@ class IntentClassifier:
     """LLM-based intent classifier for a multilingual mental health chatbot."""
 
     _RAG_INTENTS       = {IntentLabel.ASKING_MENTAL_HEALTH_QUESTION, IntentLabel.CRISIS}  # intents that should trigger RAG retrieval
-    _GENERATION_CONFIG = GenerationConfig(temperature=0.0, max_new_tokens=6000)
+    _GENERATION_CONFIG = GenerationConfig(temperature=0.0, max_output_tokens =6000)
 
     def __init__(
         self,

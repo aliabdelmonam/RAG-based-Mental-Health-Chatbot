@@ -52,13 +52,14 @@ class FullPipeline:
         if intent_raw.requires_rag or intent_raw=='unknown':
 
             logger.info(f"Running RAG Pipeline for query: {query}")
-            Config = GenerationConfig(max_new_tokens=6000, temperature=0.3)
+            Config = GenerationConfig(max_output_tokens =6000, temperature=0.3)
             rag_pipeline = RAGPipeline(
                 client = self.client,
                 intent_classifier=self.intent_classifier,
                 collection_name=self.collection_name,
                 top_k=self.top_k,
-                generation_config=Config
+                generation_config=Config,
+                query_rewrite=True
             )
             emotion = 'unknown'
             return rag_pipeline.run(emotion, query, history=self.history)
@@ -67,7 +68,7 @@ class FullPipeline:
             return "I'm sorry, but this chatbot is designed only to help with mental health questions and emotional support. I won't be able to assist with home repairs."
         else:
             logger.info(f"Running Normal Generation Pipeline for query: {query}")
-            Config = GenerationConfig(max_new_tokens=100, temperature=0.3)
+            Config = GenerationConfig(max_output_tokens =100, temperature=0.3)
             normal_pipeline = NormalPipeline(
                 client=self.client,
                 generation_config=Config)

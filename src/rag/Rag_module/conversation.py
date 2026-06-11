@@ -2,7 +2,9 @@
 from dataclasses import dataclass, field
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from typing import List
+from src.core.logger import get_logger
 
+logger = get_logger("Convserstation:")
 
 @dataclass
 class ConversationHistory:
@@ -40,3 +42,19 @@ class ConversationHistory:
             lines.append(f"  [{i+1}] {role}: {content[:100]}{'...' if len(str(content)) > 100 else ''}")
         
         return "\n".join(lines)
+    
+    def reduce_history(self, k: int = 2) -> List[BaseMessage]:
+        """Returns the last k turns (k * 2 messages) without modifying the internal state."""
+        messages_needed = k * 2
+        total_messages = len(self._messages)
+        
+        if messages_needed >= total_messages:
+            logger.warning(
+                f"Requested {k} turns ({messages_needed} messages), but history only contains "
+                f"{total_messages} messages. Returning full history."
+            )
+            return list(self._messages)
+            
+        # Return only the last k * 2 messages
+        logger.info(f"Cutting the history to {k*2}")
+        return list(self._messages[-messages_needed:])

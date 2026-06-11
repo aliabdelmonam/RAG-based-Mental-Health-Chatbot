@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional,List, TYPE_CHECKING
 from src.stores import GenerationConfig
-from src.prompts import  rag_system_prompt
+from src.prompts import  rag_system_prompt,query_rewrite_system_prompt
 from langchain_core.messages import BaseMessage,HumanMessage
 import tiktoken
 from src.stores.providers import crisis_tool
@@ -12,7 +12,8 @@ from langchain_core.messages import AIMessage, ToolMessage
 from src.core.logger import get_logger
 from src.rag.Rag_module.conversation import ConversationHistory
 from src.rag.Rag_module.base_pipeline import BundleManager
-
+from langchain_core.prompts import ChatPromptTemplate
+from src.stores.schema import  GenerationConfig, GenerationResponse
 if TYPE_CHECKING:
     from src.rag.Intent_Classifier_module.Intent_classifier import IntentClassifier
 
@@ -46,16 +47,34 @@ class RAGPipeline:
         client = BundleManager,
         intent_classifier: IntentClassifier = None,
         generation_config: Optional[GenerationConfig] = None,
+        query_rewrite:bool =False
     ):
         self.intent_classifier = intent_classifier
         self.collection_name = collection_name
         self.top_k = top_k
         self.generation_config = generation_config or GenerationConfig(
-            temperature=0.3, max_tokens=6000
+            temperature=0.3, max_output_tokens =6000
         )
         self.client = client
+        self.query_rewrite = query_rewrite
 
     def run(self, emotion: str, query: str, history: ConversationHistory) -> RAGResult:
+        
+        # 1) Query re-write
+        if self.query_rewrite:
+            temp_history = history.reduce_history(k=3)
+            rewrite_response = self._generate(
+               prompt_template=query_rewrite_system_prompt,
+                prompt_vars={
+                    "chat_history": temp_history,
+                    "input": query
+                },
+                generation_config=GenerationConfig(temperature=.1,max_output_tokens =6000)
+            )
+            logger.debug(f"The Old Query: {query}")
+            query = rewrite_response.content 
+            logger.debug(f"The New Query: {query}")
+
 
         # 2) Embed query
         embedding_query = self.client.embed(query)
@@ -82,7 +101,17 @@ class RAGPipeline:
         lc_history = history.get()
 
         # 5) First LLM call — LLM may respond normally or request a tool call
-        answer = self._generate(query=query, history=lc_history, emotion=emotion, context=context, enable_tools=True)
+
+        answer = self._generate( prompt_template=rag_system_prompt,
+                                 prompt_vars={
+                                    "context": context,
+                                    "chat_history": lc_history,
+                                    "emotion": emotion,
+                                    "input": query
+                                },
+                                enable_tools=True,
+                                generation_config=self.generation_config
+                                )
 
         if answer.finish_reason == "tool_call":
             tool_calls = answer.content  # list of tool call dicts from the LLM
@@ -101,7 +130,16 @@ class RAGPipeline:
                 ))
 
             # Step 3: second LLM call — LLM now sees the tool result and responds to the user
-            answer = self._generate(query=query, history=lc_history, emotion=emotion, context=context, enable_tools=False)
+            answer = self._generate(
+                            prompt_template=rag_system_prompt,
+                            prompt_vars={
+                                "context": context,
+                                "chat_history": lc_history, 
+                                "emotion": emotion,
+                                "input": query
+                            },
+                            generation_config=self.generation_config
+                        )
 
         history.add_user(query)
         history.add_assistant(answer.content)
@@ -128,25 +166,19 @@ class RAGPipeline:
             context_blocks.append(block)
         return "\n\n".join(context_blocks) if context_blocks else ""
 
-    def _generate(self, query: str, history: List[BaseMessage], emotion: str, context: str,enable_tools: bool = False) -> str:
+    def _generate(self, prompt_template:ChatPromptTemplate,prompt_vars: dict,
+                   generation_config:GenerationConfig,enable_tools: bool = False) -> GenerationResponse:
         """
         Builds the full message list and calls the LLM.
         Returns the full GenerationResponse (not just content)
         so the caller can inspect finish_reason and tool_calls.
         """
-        user_query = HumanMessage(content=query)
-        full_history = history + [user_query]
-        compiled_message = rag_system_prompt.format_messages(
-            context=context,
-            chat_history=full_history,
-            emotion=emotion
-        )
-        response = self.client.generate(
-            messages=compiled_message,
-            config=self.generation_config,
-            enable_tools=enable_tools
-        )
-        return response  # full GenerationResponse, not response.content
+        compiled_message = prompt_template.format_messages(**prompt_vars)
+        return self.client.generate(
+        messages=compiled_message,
+        config=generation_config,
+        enable_tools=enable_tools
+    )
 
     @staticmethod
     def _safe_get(d: dict, key: str, default: str = "") -> str:

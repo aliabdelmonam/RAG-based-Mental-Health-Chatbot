@@ -81,7 +81,7 @@ class HuggingFaceLLMProvider(LLMInterface, Embeddings):
         )
 
         model.generation_config = HFGenerationConfig(
-            max_new_tokens=config.max_new_tokens,
+            max_new_tokens =config.max_output_tokens ,
             temperature=config.temperature if config.temperature > 0 else 1.0,
             do_sample=config.temperature > 0,
             pad_token_id=tokenizer.eos_token_id,
@@ -158,11 +158,11 @@ class HuggingFaceLLMProvider(LLMInterface, Embeddings):
 
         try:
             logger.debug(
-                "generate_text | model=%s | messages=%d | temp=%.2f | max_new_tokens=%d",
+                "generate_text | model=%s | messages=%d | temp=%.2f | max_output_tokens =%d",
                 self._generation_model,
                 len(lc_messages),
                 config.temperature,
-                config.max_new_tokens,
+                config.max_output_tokens ,
             )
 
             # ── Bind tools if requested ────────────────────────────
@@ -246,7 +246,7 @@ class HuggingFaceLLMProvider(LLMInterface, Embeddings):
         """
         try:
             if self._generation_model:
-                chat_model = self._get_chat_model(GenerationConfig(max_new_tokens=1))
+                chat_model = self._get_chat_model(GenerationConfig(max_output_tokens =1))
                 chat_model.invoke([HumanMessage(content="ping")])
                 logger.info("health_check OK | generation model=%s", self._generation_model)
             else:
