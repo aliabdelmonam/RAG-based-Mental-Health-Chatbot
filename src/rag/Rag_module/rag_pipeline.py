@@ -72,6 +72,7 @@ class RAGPipeline:
         for r in search_results:
             payload_items = list(r.payload.items())[:5] if r.payload else []
             payload_str = ', '.join(f"{k}={v}" for k, v in payload_items)
+            logger.debug(f"Chunk: {payload_str}")
 
         # 4) Build RAG context
         context = self._build_context(search_results)
