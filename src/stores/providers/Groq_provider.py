@@ -112,7 +112,7 @@ class GroqLLMProvider(LLMGenerationInterface):
             messages:      Conversation history (user / assistant turns).
             system_prompt: Optional system-level instruction injected before
                            the conversation history.
-            config:        Generation parameters (temperature, max_tokens, stop).
+            config:        Generation parameters (temperature, max_output_tokens , stop).
                            Falls back to GenerationConfig defaults if None.
 
         Returns:
@@ -142,17 +142,17 @@ class GroqLLMProvider(LLMGenerationInterface):
 
         try:
             logger.debug(
-                "generate_text | model=%s | messages=%d | temp=%.2f | max_new_tokens=%d",
+                "generate_text | model=%s | messages=%d | temp=%.2f | max_output_tokens =%d",
                 self._generation_model,
                 len(messages),
                 config.temperature,
-                config.max_new_tokens,
+                config.max_output_tokens ,
             )
 
             # Bind generation config at call time
             bound_client = self.client.bind(
                 temperature=config.temperature,
-                max_tokens=config.max_new_tokens,
+                max_completion_tokens =config.max_output_tokens ,
                 stop=config.stop if config.stop else None,
             )
             model = bound_client
@@ -208,7 +208,7 @@ class GroqLLMProvider(LLMGenerationInterface):
             False — any connectivity, auth, or model error.
         """
         try:
-            self.client.bind(max_tokens=1).invoke(
+            self.client.bind(max_output_tokens =1).invoke(
                 [HumanMessage(content="ping")]
             )
             logger.info("health_check OK | model=%s", self._generation_model)

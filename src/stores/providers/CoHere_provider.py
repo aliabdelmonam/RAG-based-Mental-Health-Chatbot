@@ -74,7 +74,7 @@ class CohereLLMProvider(LLMInterface, Embeddings):
             logger.debug(
                 "generate_text | model=%s | messages=%d | temp=%.2f | max_tokens=%d",
                 self._generation_model, len(lc_messages),
-                config.temperature, config.max_new_tokens,
+                config.temperature, config.max_output_tokens ,
             )
 
             model = self.generation_client
@@ -84,7 +84,7 @@ class CohereLLMProvider(LLMInterface, Embeddings):
             response = model.invoke(
                 lc_messages,
                 temperature=config.temperature,
-                max_tokens=config.max_new_tokens,
+                max_tokens =config.max_output_tokens ,
                 **({"stop_sequences": config.stop} if config.stop else {}),
             )
 

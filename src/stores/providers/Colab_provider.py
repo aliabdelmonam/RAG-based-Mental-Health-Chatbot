@@ -62,7 +62,7 @@ class ColabLLMProvider(LLMGenerationInterface):
 
         payload = {
             "messages":       api_messages,
-            "max_new_tokens": config.max_tokens,
+            "max_new_tokens ": config.max_output_tokens ,
             "temperature":    config.temperature,
         }
 
