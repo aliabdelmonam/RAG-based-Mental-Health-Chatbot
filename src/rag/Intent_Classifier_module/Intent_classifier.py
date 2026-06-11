@@ -1,24 +1,23 @@
+from __future__ import annotations
+
 import re
 import sys
 import json
 from enum import Enum
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, List
-
-# src_dir = str(Path(__file__).resolve().parents[2])
-# if src_dir not in sys.path:
-    # sys.path.append(src_dir)
+from typing import Any, Optional, List, TYPE_CHECKING
 
 from src.core.Config import get_settings
 from src.core.logger import get_logger
 from src.rag.Language_Detection_module.Language_detector import LanguageDetector
-# print("!!! PYTHON IS EXECUTING THIS EXACT FILE !!!")
 from src.stores import GenerationConfig
 from src.prompts import intent_system_prompt
 from src.stores import LLMProviderFactory,GenerationConfig
-from langchain_core.messages import BaseMessage,HumanMessage
+from langchain_core.messages import BaseMessage
 
+if TYPE_CHECKING:
+    from src.rag.Rag_module.base_pipeline import BundleManager
 
 settings = get_settings()
 logger = get_logger(f"IntentClassifier:")
@@ -56,10 +55,10 @@ class IntentClassifier:
 
     def __init__(
         self,
-        generation_client,
+        client: BundleManager,
         language_detector: Optional[LanguageDetector] = None,
     ) -> None:
-        self._generation_client = generation_client
+        self.client = client
         self._language_detector = language_detector
 
         try:
@@ -87,7 +86,7 @@ class IntentClassifier:
             recent_context=self._format_recent_context(chat_history=chat_history, k=2)
         )
 
-        response = self._generation_client.generate_text(
+        response = self.client.generate(
             messages=messages,
             config=self._GENERATION_CONFIG,
         )
@@ -97,7 +96,7 @@ class IntentClassifier:
         return self._parse(raw)
 
     def health_check(self) -> bool:
-        return self._generation_client.health_check()
+        return self.client.health_check()
 
     def _parse(self, raw: Any) -> IntentResult:
         try:

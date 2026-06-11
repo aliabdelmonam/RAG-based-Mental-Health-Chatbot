@@ -14,11 +14,17 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str
     HF_API_KEY: str = ""
     HF_MODEL_DIR: str = "hugging_face_models"
-    GENERATION_MODEL_ID: str = "openai/gpt-oss-safeguard-20b"
-    EMBEDDING_MODEL_ID: str
+    GENERATION_MODEL_ID_PRIMARY: str = "openai/gpt-oss-safeguard-20b"
+    EMBEDDING_MODEL_ID_PRIMARY: str
 
-    GENERATION_BACKEND: str
-    EMBEDDING_BACKEND: str
+    GENERATION_BACKEND_PRIMAY: str
+    EMBEDDING_BACKEND_PRIMARY: str
+
+    GENERATION_BACKEND_FALLBACK:str
+    EMBEDDING_BACKEND_FALLBACK:str
+
+    GENERATION_MODEL_ID_FALLBACK:str
+    EMBEDDING_MODEL_ID_FALLBACK:str
 
     VECTORDB_BACKEND: str
     QDRANT_PATH: str

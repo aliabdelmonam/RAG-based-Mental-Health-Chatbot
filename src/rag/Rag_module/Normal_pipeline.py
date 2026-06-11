@@ -8,7 +8,7 @@ from src.rag.Rag_module.rag_pipeline import RAGResult
 from src.stores import GenerationConfig
 from src.prompts import  normal_chat_system_prompt
 from langchain_core.messages import HumanMessage
-
+from src.rag.Rag_module.base_pipeline import BundleManager
 
 @dataclass
 class NormalResult:
@@ -19,13 +19,14 @@ class NormalResult:
 class NormalPipeline:
     def __init__(
         self,
-        generation_client,
+        client:BundleManager,
         generation_config: Optional[GenerationConfig] = None,
     ):
-        self.generation_client = generation_client
+        # self.generation_client = generation_client
         self.generation_config = generation_config or GenerationConfig(
             temperature=0.3, max_tokens=6000
         )
+        self.client = client
     def run(self ,query: str) -> NormalResult:
 
         # 1) Generate final answer
@@ -45,7 +46,7 @@ class NormalPipeline:
         compiled_message = normal_chat_system_prompt.format_messages(
             chat_history= full_history,
         )
-        response = self.generation_client.generate_text(
+        response = self.client.generate(
             messages=compiled_message,
             config=self.generation_config,
         )

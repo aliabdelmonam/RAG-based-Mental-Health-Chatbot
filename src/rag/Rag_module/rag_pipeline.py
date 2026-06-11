@@ -2,11 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional,List
-
-from src.rag.Intent_Classifier_module.Intent_classifier import IntentClassifier
+from typing import Optional,List, TYPE_CHECKING
 from src.stores import GenerationConfig
-from src.db import Retrieve
 from src.prompts import  rag_system_prompt
 from langchain_core.messages import BaseMessage,HumanMessage
 import tiktoken
@@ -14,6 +11,10 @@ from src.stores.providers import crisis_tool
 from langchain_core.messages import AIMessage, ToolMessage
 from src.core.logger import get_logger
 from src.rag.Rag_module.conversation import ConversationHistory
+from src.rag.Rag_module.base_pipeline import BundleManager
+
+if TYPE_CHECKING:
+    from src.rag.Intent_Classifier_module.Intent_classifier import IntentClassifier
 
 logger = get_logger(f"RagPipeline:")
 
@@ -40,33 +41,28 @@ class RAGResult:
 class RAGPipeline:
     def __init__(
         self,
-        generation_client,
-        embedding_client,
-        vector_db_client,
         collection_name: str,
         top_k: int = 5,
+        client = BundleManager,
         intent_classifier: IntentClassifier = None,
         generation_config: Optional[GenerationConfig] = None,
     ):
-        self.generation_client = generation_client
-        self.embedding_client = embedding_client
-        self.vector_db_client = vector_db_client
         self.intent_classifier = intent_classifier
         self.collection_name = collection_name
         self.top_k = top_k
         self.generation_config = generation_config or GenerationConfig(
             temperature=0.3, max_tokens=6000
         )
-        self.retrieve = Retrieve(vector_db_client)
+        self.client = client
 
     def run(self, emotion: str, query: str, history: ConversationHistory) -> RAGResult:
 
         # 2) Embed query
-        embedding_query = self.embedding_client.embed_query(query)
+        embedding_query = self.client.embed(query)
         query_vector = embedding_query
 
         # 3) Retrieve top-k chunks
-        search_results = self.retrieve.search_with(
+        search_results = self.client.search(
             query_vector=query_vector,
             collection_name=self.collection_name,
             top_k=self.top_k,
@@ -144,7 +140,7 @@ class RAGPipeline:
             chat_history=full_history,
             emotion=emotion
         )
-        response = self.generation_client.generate_text(
+        response = self.client.generate(
             messages=compiled_message,
             config=self.generation_config,
             enable_tools=enable_tools

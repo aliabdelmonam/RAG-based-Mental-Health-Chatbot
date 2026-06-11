@@ -60,7 +60,6 @@ class GroqLLMProvider(LLMGenerationInterface):
     ) -> None:
         self._api_key = api_key
         self._generation_model: str = None
-        self._build_client()
         logger.info("GroqLLMProvider initialized.")
 
     def _build_client(self) -> None:

@@ -6,7 +6,7 @@ from langchain_core.embeddings import Embeddings
 from src.stores.LLMInterface import LLMInterface
 from src.stores.schema import Message, GenerationConfig, GenerationResponse, EmbeddingResponse
 from src.core.logger import get_logger
-from src.stores.providers import crisis_tool
+from .Groq_provider import crisis_tool
 
 logger = get_logger(__name__)
 
