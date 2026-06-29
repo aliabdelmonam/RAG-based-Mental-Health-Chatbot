@@ -41,7 +41,7 @@ class GeminiLLMProvider(LLMInterface, Embeddings):
     # ── Generation model management ───────────────────────────────
 
     def set_generation_model(self, model_id: str) -> None:
-        logger.debug("Generation model changed: %s → %s", self._generation_model, model_id)
+        logger.debug("Generation model changed: %s -> %s", self._generation_model, model_id)
         self._generation_model = model_id
         self._build_generation_client()
 
@@ -119,7 +119,7 @@ class GeminiLLMProvider(LLMInterface, Embeddings):
     # ── Embedding model management ────────────────────────────────
 
     def set_embedding_model(self, model_id: str) -> None:
-        logger.debug("Embedding model changed: %s → %s", self._embedding_model, model_id)
+        logger.debug("Embedding model changed: %s -> %s", self._embedding_model, model_id)
         self._embedding_model = model_id
         self._build_embedding_client()
 

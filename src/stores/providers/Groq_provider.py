@@ -88,7 +88,7 @@ class GroqLLMProvider(LLMGenerationInterface):
     def set_generation_model(self, model_id: str) -> None:
         """Switch the active Groq model at runtime."""
         logger.debug(
-            "Generation model changed: %s → %s",
+            "Generation model changed: %s -> %s",
             self._generation_model,
             model_id,
         )

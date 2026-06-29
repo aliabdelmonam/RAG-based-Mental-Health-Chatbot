@@ -36,7 +36,7 @@ class ColabLLMProvider(LLMGenerationInterface):
     # ── Generation Interface ──────────────────────────────────────
 
     def set_generation_model(self, model_id: str) -> None:
-        logger.debug("Generation model label changed: %s → %s", self._generation_model, model_id)
+        logger.debug("Generation model label changed: %s -> %s", self._generation_model, model_id)
         self._generation_model = model_id
 
     def get_generation_model(self) -> str:

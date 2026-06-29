@@ -58,7 +58,7 @@ class OpenAILLMProvider(LLMInterface):
 
     def set_generation_model(self, model_id: str) -> None:
         """Switch the chat-completion model at runtime."""
-        logger.debug("Generation model changed: %s → %s", self._generation_model, model_id)
+        logger.debug("Generation model changed: %s -> %s", self._generation_model, model_id)
         self._generation_model = model_id
 
     def get_generation_model(self) -> str:
@@ -150,7 +150,7 @@ class OpenAILLMProvider(LLMInterface):
 
     def set_embedding_model(self, model_id: str) -> None:
         """Switch the embedding model at runtime."""
-        logger.debug("Embedding model changed: %s → %s", self._embedding_model, model_id)
+        logger.debug("Embedding model changed: %s -> %s", self._embedding_model, model_id)
         self._embedding_model = model_id
 
     def get_embedding_model(self) -> str:

@@ -51,7 +51,7 @@ class HuggingFaceLLMProvider(LLMInterface, Embeddings):
     # ── Generation model management ───────────────────────────────────────────
 
     def set_generation_model(self, model_id: str) -> None:
-        logger.debug("Generation model changed: %s → %s", self._generation_model, model_id)
+        logger.debug("Generation model changed: %s -> %s", self._generation_model, model_id)
         self._generation_model = model_id
         self._lc_generation_pipeline = None
         self._lc_chat_model = None
