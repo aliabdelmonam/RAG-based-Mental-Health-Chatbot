@@ -5,6 +5,7 @@ from src.core import get_settings
 from src.db import VectorDBFactory
 from pydantic import BaseModel
 from src.rag.Rag_module.base_pipeline import ProviderBundle,BundleManager
+from src.rag.Language_Detection_module import LanguageDetector
 
 
 router = APIRouter()
@@ -43,6 +44,8 @@ fallback = ProviderBundle(generation_client=generation_client_fallback,
 
 client = BundleManager(primary=primary, fallback=fallback, max_retries=3)
 
+# Instantiate LanguageDetector once globally
+lang_detector = LanguageDetector(model_path=settings.lang_detection_model, threshold=0.60)
 
 pipelines: dict[str, FullPipeline] = {}
 
@@ -53,6 +56,7 @@ def get_pipeline(session_id: str) -> FullPipeline:
             client=client,
             collection_name="Normal_chunking",
             top_k=1,
+            lang_detector=lang_detector,
         )
     return pipelines[session_id]
 
