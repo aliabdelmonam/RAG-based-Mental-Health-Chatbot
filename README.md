@@ -7,7 +7,10 @@ This repository contains a Retrieval-Augmented Generation (RAG) chatbot applicat
 - **Multi-Provider Support**: Integrates with Cohere, Gemini, Groq, HuggingFace, OpenAI, and custom Google Colab endpoints.
 - **Failover Architecture**: The application employs a primary/fallback provider execution model managed by a central BundleManager. If the primary generation or embedding client fails, the system automatically routes to the fallback client after retrying.
 - **Stateless Language Detection**: Integrates a pre-loaded local machine learning model to classify user language, preventing redundant disk-based IO.
-- **Intent-Based Routing**: Classifies user messages into greeting, gratitude, crisis, mental health inquiry, or out-of-scope categories, applying distinct pipeline routes (such as direct chatbot responses or retrieval workflows) accordingly.
+- **Intent-Based Routing and Query Routing**: Classifies user messages into greeting, gratitude, crisis, mental health inquiry, or out-of-scope categories. Based on the classified intent of the user's query, the system dynamically routes the request:
+  - Queries requiring external knowledge or contextual mental health advice are routed to the **RAGPipeline** (Retrieval-Augmented Generation).
+  - Simple conversational queries (such as greetings, gratitude, or basic chat) are routed to the **NormalPipeline** for direct LLM response generation.
+  - Out of scope queries are routed to return a predetermined static response.
 - **Query Rewriting**: Expands and rewrites incoming queries in context with the recent chat history to optimize retrieval from the vector database.
 - **Crisis Intervention Tooling**: Detects crisis situations and automatically invokes specialized tools to provide immediate, curated resources and guidance.
 - **LangSmith/LangChain Integration**: Automatic performance monitoring, latency, cost tracking, and execution tracing for all LLM prompts, retrievals, and rewrites.
